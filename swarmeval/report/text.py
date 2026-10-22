@@ -201,9 +201,11 @@ def render_coordination(result: Any) -> str:
             cov_s = c.get("provenance_coverage")
             dead = c.get("dead_rate")
             share = util.get(aid, {}).get("token_share")
+            # built outside the f-string: reusing its quote inside needs Python 3.12+
+            dead_s = "unknown" if dead is None else f"{dead * 100:.0f}%"
+            cov_txt = "unknown" if cov_s is None else f"{cov_s['mean'] * 100:.0f}%"
             parts.append(f"  {aid[:15]:<16}{c['lineage_rate'] * 100:>8.0f}%{c['consumed_rate'] * 100:>9.0f}%"
-                         f"{'unknown' if dead is None else f'{dead * 100:.0f}%':>9}"
-                         f"{'unknown' if cov_s is None else f'{cov_s['mean'] * 100:.0f}%':>10}  "
+                         f"{dead_s:>9}{cov_txt:>10}  "
                          + (f"{bar(share)} {share * 100:>3.0f}%" if share is not None else "unknown"))
         parts.append("  lineage = runs where its artifacts reached the final output; consumed = an artifact used "
                      "by another agent;")
