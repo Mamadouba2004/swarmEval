@@ -141,11 +141,37 @@ Built-in evaluators: `exact_match`, `contains_all` / `contains_any` (with `forbi
 |---|---|
 | **Performance** | success rate, mean score, constraint pass rate, per-task and per-trial breakdown, crashed runs |
 | **Efficiency** | input/output tokens, LLM and tool call counts, messages, cost (pricing table), cost per successful task, wall clock, aggregate agent time, waiting time, per-agent tokens/cost/calls/time |
-| **Coordination** (Phase 2, in progress) | execution graph (`build_graph`: agent graph + work-unit DAG), provenance coverage, per-agent utilization shares, observed contribution (final-output lineage, artifacts consumed by others, `dead` only when provenance coverage is complete), communication overhead, redundant work -- `result.per_run_coordination`, `result.coordination` |
+| **Coordination** (Phase 2, in progress) | execution graph (`build_graph`: agent graph + work-unit DAG), provenance coverage, per-agent utilization shares, observed contribution (final-output lineage, artifacts consumed by others, `dead` only when provenance coverage is complete), communication overhead, redundant work, critical path and parallelism, context bloat, swarm smells -- `result.per_run_coordination`, `result.coordination` |
 
 **Communication / Work** = message body tokens as a share of LLM tokens: Σ message body tokens ÷ Σ (prompt + output tokens of LLM calls). A message's body excludes the artifacts it carries (their tokens count once, when produced). Messages are also split by kind (coordination = task_assignment/coordination/request, information, work product = result/feedback), with repeated messages, broadcasts, fan-in/out, relay fraction, **hub share** (largest share of messages one agent was party to; 1.0 for a star) and the share of messages the receiver used. Communication is not automatically waste.
 
 **Redundancy** is two separate numbers. *Tool redundancy* = accidental duplicate tool calls ÷ tool calls, where a duplicate has the same tool and arguments as an earlier call (strings compared exactly, key order ignored) (compared by a hash of the full arguments taken at record time, so `capture_text=False` previews do not merge distinct calls); retries (after the agent's own failed call) and verification (critic/verifier/reviewer/validator/judge roles or `intent="verification"`) are counted separately and left out of the ratio. *Artifact redundancy* = artifacts matching an earlier artifact of another producer (same hash or text similarity) ÷ artifacts, excluding copies of the producer's own inputs. Similarity is lexical (word 3-shingle Jaccard ≥ 0.6, no dependencies) by default; `analyze_runs(runs, similarity="embeddings")` uses sentence embeddings (cosine ≥ 0.85, needs `swarmeval[embeddings]` or `EmbeddingSimilarity(embed_fn=...)`), and any object with `threshold`, `candidates()` and `scores()` can be passed (or `"pkg.module:attr"`). Without captured text (`capture_text=False`) only exact hashes are compared and the result is marked `degraded`.
+
+### Phase 2: coordination analysis
+
+Everything below is computed from the recorded trajectory alone and is observational: it says what happened, not what caused what (that needs the Phase 3 ablations). Where the record is silent (Phase 1 data has no receive events), dependencies are inferred from timing, flagged as inferred, and the report says how much was recorded.
+
+| Metric | Definition |
+|---|---|
+| Critical path | heaviest path through the work-unit DAG, each LLM/tool call weighted by its duration (sends, receives, artifacts, waits weigh 0) |
+| Work | Σ durations of top-level LLM/tool calls (calls nested inside another call are not counted twice) |
+| Actual parallelism | work ÷ wall clock |
+| Potential parallelism | work ÷ critical path: the most the recorded dependencies allow |
+| Parallel headroom | wall − critical path (and wall ÷ critical path) |
+| Unrecorded time | wall − union of all call and wait intervals: idle or untracked, reported so it is not read as headroom |
+| Communication / Work | Σ message body tokens ÷ Σ LLM tokens (prompt + output); bodies exclude carried artifacts |
+| Hub share | the largest share of messages one agent was party to |
+| Redundant tool calls | accidental duplicate tool calls ÷ tool calls (retries and verification excluded) |
+| Redundant artifacts | artifacts matching an earlier other-producer artifact ÷ artifacts (method: lexical, embeddings or hash) |
+| Context bloat | per LLM call, prompt tokens ÷ tokens traceable to recorded inputs (task, used artifacts, received message bodies, earlier outputs of the span, `system_tokens`); run level Σ ÷ Σ |
+| Dependency coverage | share of messages with a recorded receive event |
+| Observed contribution | provenance: final-output lineage, artifacts consumed by others, `dead` (nothing used, complete provenance) -- not marginal effect |
+
+**Swarm smells** (`detect_smells`, one list per run in `cm.diagnostics`, prevalence over runs in `result.coordination.diagnostics`) are hypotheses to test, not verdicts. Each has an *observation* (measured, with numbers), a *hypothesis* ("may", "is consistent with") and an *intervention* naming a concrete experiment (e.g. "re-run without researcher_c and compare success and cost"). Detected: `redundant_delegation`, `agent_ping_pong`, `over_agentization`, `under_specialization`, `coordinator_bottleneck`, `late_information`, `premature_synthesis`, `context_bloat`, `dead_agent`, `serialized_execution`, `communication_overhead`. Thresholds live in `SmellConfig` (initial guesses, to be validated with Phase 3 ablations) and can be overridden with a JSON object: `analyze_runs(runs, smell_config="smells.json")` or `--smells-config smells.json`; unknown keys are rejected. Evidence resting on inferred edges is marked `inferred` and its severity capped.
+
+On the demo swarm the report flags `context_bloat` (synthesizer and coordinator), `under_specialization` and `redundant_delegation` (researchers a and c share a scope), `coordinator_bottleneck` and `dead_agent` (researcher_c), the problems built into it.
+
+**Graph export**: `swarmeval graph runs.json [--run N] [--view agents|dag] [--format mermaid|dot|json] [--out FILE]` writes one run's agent graph (token share per agent, dead agents dashed red, timing-inferred edges dashed, edges labelled `kind ×count · tokens`) or work-unit DAG (grouped by agent, critical path highlighted). Mermaid renders on GitHub and mermaid.live; DOT with `dot -Tsvg`. In Python: `to_mermaid(cm.graph, view="agents", coordination=cm)`, `to_dot`, `to_json`.
 
 Repeated trials use seeds derived from `(seed, task, trial)` so a run set is reproducible. Means and spreads are reported; confidence intervals are Phase 3.
 
@@ -170,7 +196,7 @@ cmp.improved, cmp.regressed, cmp.is_tradeoff, cmp.flips["lost"]
 ```
 
 * Both sides are re-analysed on the tasks they share; tasks present on only one side are listed and left out.
-* Every metric (success, score, crashes, cost per run / per success, tokens, calls, messages, wall clock, agent time, errors) gets its own baseline, candidate, delta and verdict (`improved` / `regressed` / `unchanged`), so a cheaper but less accurate candidate shows up as a **tradeoff** rather than one blended score.
+* Every metric (success, score, crashes, cost per run / per success, tokens, calls, messages, wall clock, agent time, errors, and the coordination metrics: critical path, actual / potential parallelism, Communication / Work, tool / artifact redundancy, context bloat, dead agents and smells per run) gets its own baseline, candidate, delta and verdict (`improved` / `regressed` / `unchanged`), so a cheaper but less accurate candidate shows up as a **tradeoff** rather than one blended score. Potential parallelism and Communication / Work have no better direction and show as `changed`.
 * Runs are paired by task and trial (same derived seed), giving fail→pass and pass→fail flips; per-task and per-agent rows show where the change happened, including agents that were added or removed.
 * A cost that is incomplete on either side is reported as unknown, never compared as $0.
 * Warnings flag different benchmarks or trial counts, mismatched seeds, and fewer than 3 trials. Differences are measured, not tested for significance (that is Phase 3).
@@ -183,7 +209,10 @@ swarmeval run    --swarm pkg.mod:factory --benchmark bench.json --trials 3 --out
 swarmeval report runs/baseline.json [--trace N] [--pricing p.json]
 swarmeval export runs/baseline.json events.parquet [--format jsonl|parquet]
 swarmeval compare runs/flat.json runs/hierarchical.json [--pricing p.json] [--out cmp.json]
+swarmeval graph  runs/baseline.json [--run N] [--view agents|dag] [--format mermaid|dot|json] [--out FILE]
 ```
+
+`demo`, `run`, `report` and `compare` also take `--no-coordination` (skip the Phase 2 analysis), `--similarity lexical|embeddings|pkg.mod:attr` and `--smells-config FILE`.
 
 ## Layout
 
@@ -193,8 +222,9 @@ swarmeval/
   recorder.py      RunContext / AgentSpan: the agent interface and recorder
   runner.py        Swarm, SwarmRunner, RunSet, repeated trials, seeds
   evaluators.py    deterministic evaluators with JSON specs
-  graph/           execution graph: agent graph and work-unit DAG
-  metrics/         performance, efficiency, contribution, coordination
+  graph/           execution graph (agent graph, work-unit DAG) and Mermaid/DOT/JSON export
+  metrics/         performance, efficiency, contribution, communication, redundancy, dependency, context
+  diagnostics/     swarm smells and their prevalence over runs
   compare.py       run-to-run comparison
   report/          text report, comparison report and trajectory trace
   export/          JSONL and Parquet events

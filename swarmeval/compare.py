@@ -5,6 +5,11 @@ with one pricing table) and compared metric by metric, per task, per paired
 run and per agent.  Every metric keeps its own direction, so a candidate that
 is cheaper but less accurate shows as a tradeoff, not as a single score.
 
+Some coordination metrics have no better direction (potential parallelism,
+Communication / Work: communication is not automatically waste); they are
+reported as ``changed`` rather than improved or regressed.  Coordination
+rows are ``unknown`` when either side was analysed without coordination.
+
 Differences are measured, not tested: confidence intervals and significance
 are Phase 3.  With few trials, treat small deltas as noise.
 """
@@ -18,8 +23,8 @@ from .evaluate import EvaluationResult, analyze_runs
 from .pricing import PricingTable
 from .runner import RunSet
 
-# (key, label, higher_is_better, unit)
-METRICS: List[Tuple[str, str, bool, str]] = [
+# (key, label, higher_is_better, unit); higher_is_better None = neutral (no better direction)
+METRICS: List[Tuple[str, str, Optional[bool], str]] = [
     ("success_rate", "Task Success", True, "pct"),
     ("mean_score", "Mean Score", True, "num"),
     ("run_errors", "Runs Crashed", False, "int"),
@@ -32,10 +37,45 @@ METRICS: List[Tuple[str, str, bool, str]] = [
     ("wall_clock_s", "Wall Clock / Run", False, "s"),
     ("agent_time_s", "Agent Time / Run", False, "s"),
     ("errors_per_run", "Errors / Run", False, "num"),
+    # coordination (Phase 2)
+    ("critical_path_s", "Critical Path / Run", False, "s"),
+    ("actual_parallelism", "Actual Parallelism", True, "num"),
+    ("potential_parallelism", "Potential Parallelism", None, "num"),
+    ("comm_work_ratio", "Communication / Work", None, "num"),
+    ("tool_redundancy", "Redundant Tool Calls", False, "pct"),
+    ("artifact_redundancy", "Redundant Artifacts", False, "pct"),
+    ("context_bloat", "Context Bloat", False, "num"),
+    ("dead_agents_per_run", "Dead Agents / Run", False, "num"),
+    ("smells_per_run", "Smells / Run", False, "num"),
 ]
+COORDINATION_KEYS = ("critical_path_s", "actual_parallelism", "potential_parallelism", "comm_work_ratio",
+                     "tool_redundancy", "artifact_redundancy", "context_bloat", "dead_agents_per_run",
+                     "smells_per_run")
 
 # Relative changes smaller than this are reported as unchanged.
 TOLERANCE = 0.005
+
+
+def _mean(s: Any) -> Optional[float]:
+    return s.mean if s is not None and s.n else None
+
+
+def _coordination_values(r: EvaluationResult) -> Dict[str, Optional[float]]:
+    cs = r.coordination
+    if cs is None:
+        return {k: None for k in COORDINATION_KEYS}
+    dep, comm, red, ctx = cs.dependency, cs.communication, cs.redundancy, cs.context
+    return {
+        "critical_path_s": _mean(dep.critical_path_s) if dep else None,
+        "actual_parallelism": _mean(dep.actual_parallelism) if dep else None,
+        "potential_parallelism": _mean(dep.potential_parallelism) if dep else None,
+        "comm_work_ratio": _mean(comm.comm_work_ratio) if comm else None,
+        "tool_redundancy": _mean(red.tool_redundancy) if red else None,
+        "artifact_redundancy": _mean(red.artifact_redundancy) if red else None,
+        "context_bloat": _mean(ctx.ratio) if ctx else None,
+        "dead_agents_per_run": _mean(cs.dead_agents_per_run),
+        "smells_per_run": _mean(cs.smells_per_run),
+    }
 
 
 def _values(r: EvaluationResult) -> Dict[str, Optional[float]]:
@@ -54,6 +94,7 @@ def _values(r: EvaluationResult) -> Dict[str, Optional[float]]:
         "wall_clock_s": eff.wall_clock_s.mean,
         "agent_time_s": eff.agent_time_s.mean,
         "errors_per_run": eff.errors.mean,
+        **_coordination_values(r),
     }
 
 
@@ -63,7 +104,7 @@ class MetricDelta:
     label: str
     baseline: Optional[float]
     candidate: Optional[float]
-    higher_is_better: bool
+    higher_is_better: Optional[bool]      # None = neutral: a change is neither better nor worse
     unit: str
 
     @property
@@ -81,14 +122,17 @@ class MetricDelta:
 
     @property
     def verdict(self) -> str:
-        """``improved`` / ``regressed`` / ``unchanged``, or ``unknown`` when a
-        side is missing (e.g. a cost that could not be priced)."""
+        """``improved`` / ``regressed`` / ``unchanged``, ``changed`` for a
+        neutral metric, or ``unknown`` when a side is missing (e.g. a cost
+        that could not be priced)."""
         d = self.delta
         if d is None:
             return "unknown"
         scale = abs(self.baseline) if self.baseline else max(abs(self.candidate or 0.0), 1.0)
         if abs(d) <= TOLERANCE * scale:
             return "unchanged"
+        if self.higher_is_better is None:
+            return "changed"
         return "improved" if (d > 0) == self.higher_is_better else "regressed"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -164,10 +208,13 @@ def _as_runs(x: Any) -> RunSet:
     raise TypeError(f"expected an EvaluationResult or RunSet, got {type(x).__name__}")
 
 
-def compare(baseline: Any, candidate: Any, pricing: Optional[PricingTable] = None) -> Comparison:
+def compare(baseline: Any, candidate: Any, pricing: Optional[PricingTable] = None, coordination: bool = True,
+            similarity: Any = None, smell_config: Any = None) -> Comparison:
     """Compare ``candidate`` against ``baseline`` (each an ``EvaluationResult``
     or ``RunSet``) on the tasks both contain.  Pass ``pricing`` to price both
-    with the same table; otherwise each keeps the cost recorded at run time."""
+    with the same table; otherwise each keeps the cost recorded at run time.
+    ``coordination``, ``similarity`` and ``smell_config`` are passed to
+    ``analyze_runs`` for both sides."""
     base_runs, cand_runs = _as_runs(baseline), _as_runs(candidate)
     warnings: List[str] = []
     if base_runs.benchmark_name != cand_runs.benchmark_name:
@@ -182,8 +229,9 @@ def compare(baseline: Any, candidate: Any, pricing: Optional[PricingTable] = Non
     if not shared:
         raise ValueError("the two run sets have no task in common")
 
-    b = analyze_runs(_subset(base_runs, shared), pricing=pricing)
-    c = analyze_runs(_subset(cand_runs, shared), pricing=pricing)
+    kw = dict(pricing=pricing, coordination=coordination, similarity=similarity, smell_config=smell_config)
+    b = analyze_runs(_subset(base_runs, shared), **kw)
+    c = analyze_runs(_subset(cand_runs, shared), **kw)
     if b.performance.trials != c.performance.trials:
         warnings.append(f"different trial counts: {b.performance.trials} vs {c.performance.trials}")
     for side, r in (("baseline", b), ("candidate", c)):

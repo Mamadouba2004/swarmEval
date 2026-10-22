@@ -207,4 +207,9 @@ def test_summary_dead_rate_ignores_unknown_runs():
 
 def test_contribution_is_never_reported_as_a_percentage(demo):
     text = json.dumps(demo.coordination.to_dict()) + json.dumps(demo.per_run_coordination[0].to_dict())
-    assert "contributed" not in text and "%" not in text
+    assert "contributed" not in text
+    # diagnostics quote measured shares ("68% similar"); contribution itself is never a percentage
+    cm, cs = demo.per_run_coordination[0], demo.coordination
+    contrib = json.dumps([{k: v.to_dict() for k, v in cm.contribution.items()}, cm.lineage.to_dict(),
+                          cs.contribution])
+    assert "%" not in contrib

@@ -1,7 +1,8 @@
 """Human-readable text reports (terminal friendly)."""
 from __future__ import annotations
 
-from typing import Any, List, Optional, Sequence
+import textwrap
+from typing import Any, Callable, List, Optional, Sequence
 
 from ..schema import EventType, Trajectory, preview
 from ..stats import Summary
@@ -47,7 +48,8 @@ def box(title: str, rows: Sequence[Any], width: int = 58) -> str:
     return "\n".join(out)
 
 
-def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True) -> str:
+def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
+                show_coordination: bool = True) -> str:
     perf, eff = result.performance, result.efficiency
     n_runs = len(result.runs)
     rows: List[Any] = [
@@ -100,8 +102,131 @@ def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True) 
             parts.append(f"  {tid:<16}{_pct(t['success_rate']):>9}{t['score']:>8.2f}"
                          f"{_money(t['cost_usd'], t.get('cost_complete', True)):>10}"
                          f"{t['latency_s']:>8.1f}s")
+    if show_coordination and getattr(result, "coordination", None) is not None:
+        parts.append("")
+        parts.append(render_coordination(result))
     parts.append("")
     parts.append(f"Evaluators: {', '.join(perf.evaluators) or 'none'}")
+    return "\n".join(parts)
+
+
+# --------------------------------------------------------------------------- #
+# Coordination (Phase 2)
+# --------------------------------------------------------------------------- #
+_LABEL_W, _VALUE_W = 46, 30
+_SEV_MARK = {"high": "⚠ HIGH", "medium": "⚠ MED ", "low": "· LOW "}
+
+
+def _ranged(s: Optional[Summary], fmt: Callable[[float], str]) -> str:
+    """Mean over runs, with the range when runs differ; ``unknown`` when no
+    run defined the value."""
+    if s is None or s.n == 0:
+        return "unknown"
+    out = fmt(s.mean)
+    if s.n > 1 and fmt(s.minimum) != fmt(s.maximum):
+        out += f" ({fmt(s.minimum)}–{fmt(s.maximum)})"
+    return out
+
+
+def _row(label: str, value: str) -> str:
+    return f"{label:<{_LABEL_W}}{value[:_VALUE_W]:>{_VALUE_W}}"
+
+
+def _wrap(prefix: str, text: str, indent: int, width: int = 104) -> List[str]:
+    return textwrap.wrap(text, width=width, initial_indent=prefix, subsequent_indent=" " * indent) or [prefix]
+
+
+def render_coordination(result: Any) -> str:
+    """COORDINATION box, OBSERVED CONTRIBUTION table and DIAGNOSTICS list of
+    an ``EvaluationResult`` with coordination analysis.  Every ratio is named
+    with its definition; values are means over runs, with the range when the
+    runs differ."""
+    cs = result.coordination
+    if cs is None:
+        return ""
+    dep, comm, red, ctx = cs.dependency, cs.communication, cs.redundancy, cs.context
+    sec = lambda x: f"{x:.1f}s"         # noqa: E731
+    times = lambda x: f"{x:.2f}×"       # noqa: E731
+    pct = lambda x: f"{x * 100:.1f}%"  # noqa: E731
+    rows: List[Any] = [f"{cs.n_runs} runs  ·  values are means over runs (range)", None]
+    if dep is not None:
+        headroom = _ranged(dep.headroom_s, sec)
+        if dep.headroom_ratio is not None:
+            headroom += f"  {dep.headroom_ratio.mean:.2f}×"
+        rows += [
+            _row("Critical Path / Run", _ranged(dep.critical_path_s, sec)),
+            _row("Actual Parallelism (work ÷ wall)", _ranged(dep.actual_parallelism, times)),
+            _row("Potential Parallelism (work ÷ critical path)", _ranged(dep.potential_parallelism, times)),
+            _row("Parallel Headroom (wall − critical path)", headroom),
+            _row("Unrecorded Time (nothing running)", _ranged(dep.unrecorded_s, sec)),
+            None,
+        ]
+    if comm is not None:
+        hub = _ranged(comm.hub_share, lambda x: f"{x * 100:.0f}%")
+        if comm.hub_agents:
+            top = max(comm.hub_agents.items(), key=lambda kv: (kv[1], kv[0]))[0]
+            hub += f" ({top})"
+        rows += [_row("Communication / Work (message ÷ LLM tokens)", _ranged(comm.comm_work_ratio,
+                                                                             lambda x: f"{x:.3f}")),
+                 _row("Hub Share (agent)", hub)]
+    if red is not None:
+        method = ", ".join(sorted(red.methods)) or "none"
+        if red.degraded_runs:
+            method += ", hash only in " + str(red.degraded_runs)
+        rows += [_row("Redundant Tool Calls (accidental ÷ calls)", _ranged(red.tool_redundancy, pct)),
+                 _row(f"Redundant Artifacts ({method})", _ranged(red.artifact_redundancy, pct))]
+    if ctx is not None:
+        rows.append(_row("Context Bloat (received ÷ relevant tokens)",
+                         _ranged(ctx.ratio, lambda x: f"{x:.1f}×")))
+        if ctx.worst_ratio is not None and ctx.worst_agents:
+            top = max(ctx.worst_agents.items(), key=lambda kv: (kv[1], kv[0]))[0]
+            rows.append(_row("  Worst Call / Run (most frequent agent)", f"{ctx.worst_ratio.mean:.1f}× ({top})"))
+    rows += [None,
+             _row("Dependency Coverage (receive events)", _ranged(cs.message_receive_coverage, pct)),
+             _row("Derivation Coverage (derived_from)", _ranged(cs.derivation_coverage, pct))]
+    parts = [box("COORDINATION", rows, width=_LABEL_W + _VALUE_W + 4)]
+    cov = cs.message_receive_coverage
+    if cov is not None and cov.mean < 1.0:
+        parts.append(f"  ⚠ receive events recorded for {cov.mean * 100:.0f}% of messages: the remaining message "
+                     "edges are inferred from timing; dependencies may be over- or under-counted")
+    if dep is not None and dep.unrecorded_s is not None and dep.unrecorded_s.mean > 0.05:
+        parts.append("  unrecorded time is idle or untracked work, not parallel headroom")
+
+    if cs.contribution:
+        parts += ["", "OBSERVED CONTRIBUTION (provenance, not marginal effect)",
+                  f"  {'agent':<16}{'lineage':>9}{'consumed':>10}{'dead':>9}{'coverage':>10}"
+                  "  utilization (tokens)"]
+        util = cs.utilization
+        for aid, c in cs.contribution.items():
+            cov_s = c.get("provenance_coverage")
+            dead = c.get("dead_rate")
+            share = util.get(aid, {}).get("token_share")
+            parts.append(f"  {aid[:15]:<16}{c['lineage_rate'] * 100:>8.0f}%{c['consumed_rate'] * 100:>9.0f}%"
+                         f"{'unknown' if dead is None else f'{dead * 100:.0f}%':>9}"
+                         f"{'unknown' if cov_s is None else f'{cov_s['mean'] * 100:.0f}%':>10}  "
+                         + (f"{bar(share)} {share * 100:>3.0f}%" if share is not None else "unknown"))
+        parts.append("  lineage = runs where its artifacts reached the final output; consumed = an artifact used "
+                     "by another agent;")
+        parts.append("  dead = nothing it sent was used (only over runs with complete provenance); "
+                     "coverage = provenance coverage")
+
+    diag = cs.diagnostics
+    if diag is not None:
+        parts += ["", "DIAGNOSTICS (hypotheses to test, not verdicts)"]
+        if not diag.smells:
+            parts.append("  no smells at the current thresholds")
+        for sp in diag.smells:
+            agents = ", ".join(f"{a} {n}" for a, n in list(sp.agents.items())[:4])
+            head = (f"  {_SEV_MARK.get(sp.max_severity, sp.max_severity)}  {sp.smell}  ·  "
+                    f"{sp.runs_affected}/{sp.n_runs} runs ({sp.prevalence * 100:.0f}%)")
+            if agents:
+                head += f"  ·  {agents}"
+            if sp.inferred_runs:
+                head += f"  ·  inferred in {sp.inferred_runs}"
+            parts.append(head)
+            parts += _wrap("      Observed:   ", sp.observation, 18)
+            parts += _wrap("      Hypothesis: ", sp.hypothesis, 18)
+            parts += _wrap("      Test:       ", sp.intervention, 18)
     return "\n".join(parts)
 
 
@@ -137,7 +262,7 @@ def _fmt_delta(m: Any) -> str:
     return s + (f" ({rel*100:+.0f}%)" if rel is not None and m.unit != "pct" else "")
 
 
-_MARK = {"improved": "▲", "regressed": "▼", "unchanged": "=", "unknown": "?"}
+_MARK = {"improved": "▲", "regressed": "▼", "unchanged": "=", "unknown": "?", "changed": "~"}
 
 
 def render_comparison(cmp: Any, max_rows: int = 20) -> str:
@@ -159,6 +284,9 @@ def render_comparison(cmp: Any, max_rows: int = 20) -> str:
     else:
         lines.append("  no measurable difference")
     gained, lost = cmp.flips["gained"], cmp.flips["lost"]
+    changed_neutral = [m.key for m in cmp.metrics if m.verdict == "changed"]
+    if changed_neutral:
+        lines.append("  changed (no better direction): " + ", ".join(changed_neutral))
     lines.append(f"  paired outcomes: {len(gained)} fail→pass, {len(lost)} pass→fail "
                  f"(of {cmp.paired_runs} runs with the same task and trial)")
 

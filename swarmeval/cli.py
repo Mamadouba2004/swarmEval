@@ -5,6 +5,10 @@
     swarmeval report runs/baseline.json [--trace N] [--pricing prices.json]
     swarmeval export runs/baseline.json events.parquet [--format jsonl|parquet]
     swarmeval compare runs/baseline.json runs/candidate.json [--pricing prices.json] [--out cmp.json]
+    swarmeval graph runs/baseline.json [--run N] [--view agents|dag] [--format mermaid|dot|json] [--out F]
+
+demo, run, report and compare also take --no-coordination, --similarity NAME|pkg.mod:attr and
+--smells-config FILE (JSON object of SmellConfig threshold overrides).
 """
 from __future__ import annotations
 
@@ -12,16 +16,21 @@ import argparse
 import importlib
 import os
 import sys
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from . import __version__
 from .evaluate import AnalysisFailed, EvaluationResult, analyze_runs, evaluate, load_runset
 from .export import export_events
+from .diagnostics.smells import load_smell_config
 from .export.jsonl import write_events_jsonl
+from .graph.builder import build_graph
+from .graph.export import GRAPH_FORMATS, VIEWS, export_graph
+from .metrics.coordination import compute_coordination
 from .pricing import PricingTable
 from .recorder import SimClock
 from .report.text import render_trajectory
 from .schema import Benchmark
+from .similarity import resolve_similarity
 
 
 def _load_obj(spec: str) -> Any:
@@ -47,6 +56,33 @@ def _clock_factory(name: Optional[str]) -> Optional[Callable[[], Any]]:
     return _load_obj(name)
 
 
+def _analysis_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
+    """Coordination options shared by demo/run/report/compare."""
+    smell_config = None
+    if getattr(args, "smells_config", None):
+        try:
+            smell_config = load_smell_config(args.smells_config)
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"swarmeval: --smells-config: {exc}")
+    similarity = getattr(args, "similarity", None)
+    if similarity:
+        try:
+            similarity = resolve_similarity(similarity)
+        except (ImportError, ValueError, AttributeError, TypeError) as exc:
+            raise SystemExit(f"swarmeval: --similarity: {exc}")
+    return {"coordination": not getattr(args, "no_coordination", False), "similarity": similarity,
+            "smell_config": smell_config}
+
+
+def _add_analysis_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--no-coordination", action="store_true",
+                   help="skip the coordination analysis (execution graph, smells)")
+    p.add_argument("--similarity", default=None, metavar="NAME|pkg.mod:attr",
+                   help="artifact redundancy backend: lexical (default), embeddings, or an import path")
+    p.add_argument("--smells-config", default=None, metavar="FILE",
+                   help="JSON object overriding smell thresholds (see SmellConfig)")
+
+
 def _write_outputs(result: EvaluationResult, out: Optional[str]) -> None:
     if not out:
         return
@@ -69,7 +105,8 @@ def _write_plain_evaluation(exc: AnalysisFailed, out: Optional[str]) -> int:
 def cmd_demo(args: argparse.Namespace) -> int:
     from .examples.research_swarm import build_benchmark, make_swarm
     try:
-        result = evaluate(make_swarm, build_benchmark(), trials=args.trials, clock_factory=SimClock, progress=True)
+        result = evaluate(make_swarm, build_benchmark(), trials=args.trials, clock_factory=SimClock, progress=True,
+                          **_analysis_kwargs(args))
     except AnalysisFailed as exc:
         return _write_plain_evaluation(exc, args.out)
     print(result.report())
@@ -86,7 +123,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     pricing = PricingTable.load(args.pricing) if args.pricing else None
     try:
         result = evaluate(swarm, bench, trials=args.trials, seed=args.seed, clock_factory=_clock_factory(args.clock),
-                          label=args.label, progress=True, pricing=pricing, capture_text=not args.no_capture_text)
+                          label=args.label, progress=True, pricing=pricing, capture_text=not args.no_capture_text,
+                          **_analysis_kwargs(args))
     except AnalysisFailed as exc:
         return _write_plain_evaluation(exc, args.out)
     print(result.report())
@@ -111,7 +149,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     pricing = PricingTable.load(args.pricing) if args.pricing else None
     code = 0
     try:
-        result = analyze_runs(runs, pricing=pricing)
+        result = analyze_runs(runs, pricing=pricing, **_analysis_kwargs(args))
     except Exception as exc:  # every run failed the same way: the runs are on disk, show what still holds
         _analysis_failed(exc)
         result, code = analyze_runs(runs, pricing=pricing, coordination=False), 1
@@ -129,7 +167,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
     base, cand = _load_runs_or_exit(args.baseline), _load_runs_or_exit(args.candidate)
     pricing = PricingTable.load(args.pricing) if args.pricing else None
     try:
-        cmp = compare(base, cand, pricing=pricing)
+        cmp = compare(base, cand, pricing=pricing, **_analysis_kwargs(args))
     except ValueError as exc:
         raise SystemExit(f"swarmeval: {exc}")
     print(cmp.report())
@@ -146,6 +184,23 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_graph(args: argparse.Namespace) -> int:
+    runs = _load_runs_or_exit(args.path)
+    if not 0 <= args.run < len(runs):
+        raise SystemExit(f"swarmeval: --run {args.run} out of range (file has {len(runs)} runs)")
+    traj = runs.trajectories[args.run]
+    graph = build_graph(traj)
+    cm = compute_coordination(traj, graph=graph)
+    text = export_graph(graph, args.format, view=args.view, coordination=cm)
+    if args.out:
+        with open(args.out, "w") as f:
+            f.write(text)
+        print(f"wrote {args.format} ({args.view} view) of run {traj.run_id} to {args.out}")
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(prog="swarmeval", description="Record and evaluate multi-agent systems.")
     p.add_argument("--version", action="version", version=f"swarmeval {__version__}")
@@ -155,6 +210,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     d.add_argument("--trials", type=int, default=3)
     d.add_argument("--out", default=None, help="directory for JSON/JSONL outputs")
     d.add_argument("--trace", action="store_true", help="also print the first trajectory")
+    _add_analysis_args(d)
     d.set_defaults(fn=cmd_demo)
 
     r = sub.add_parser("run", help="run a swarm on a benchmark and print the report")
@@ -168,12 +224,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     r.add_argument("--pricing", default=None, help='JSON {"model": [input, output], ...} in USD per 1M tokens')
     r.add_argument("--no-capture-text", action="store_true",
                    help="keep only short previews of prompts, outputs and artifacts")
+    _add_analysis_args(r)
     r.set_defaults(fn=cmd_run)
 
     rp = sub.add_parser("report", help="re-analyse a saved run set")
     rp.add_argument("path")
     rp.add_argument("--trace", type=int, default=None, metavar="N", help="also print trajectory N")
     rp.add_argument("--pricing", default=None, help="re-price every LLM call with this JSON pricing table")
+    _add_analysis_args(rp)
     rp.set_defaults(fn=cmd_report)
 
     ex = sub.add_parser("export", help="convert a saved run set to an event stream (JSONL or Parquet)")
@@ -188,7 +246,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     cp.add_argument("candidate", help="saved RunSet or EvaluationResult JSON")
     cp.add_argument("--pricing", default=None, help="price both sides with this JSON pricing table")
     cp.add_argument("--out", default=None, help="also write the comparison as JSON")
+    _add_analysis_args(cp)
     cp.set_defaults(fn=cmd_compare)
+
+    g = sub.add_parser("graph", help="export one run's execution graph (Mermaid, DOT or JSON)")
+    g.add_argument("path", help="saved RunSet or EvaluationResult JSON")
+    g.add_argument("--run", type=int, default=0, metavar="N", help="which run (default 0)")
+    g.add_argument("--view", choices=list(VIEWS), default="agents",
+                   help="agents: who talked to whom; dag: work units and the critical path")
+    g.add_argument("--format", choices=sorted(GRAPH_FORMATS), default="mermaid")
+    g.add_argument("--out", default=None, help="output file (default: stdout)")
+    g.set_defaults(fn=cmd_graph)
 
     args = p.parse_args(argv)
     return args.fn(args)

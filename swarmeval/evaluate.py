@@ -15,6 +15,7 @@ from .pricing import PricingTable
 from .recorder import Clock
 from .runner import RunOptions, RunSet, SwarmRunner
 from .schema import Benchmark, Trajectory
+from .diagnostics.smells import resolve_smell_config
 from .similarity import resolve_similarity
 from .stats import Summary, mean, summarize
 
@@ -233,7 +234,9 @@ def analyze_runs(runs: RunSet, pricing: Optional[PricingTable] = None, coordinat
     """Recompute the evaluation from trajectories (e.g. a saved RunSet).
     With ``pricing``, every LLM call is re-priced from its recorded model and
     token counts instead of using the cost stored at run time.
-    ``coordination=False`` skips the execution-graph analysis.  A run whose
+    ``coordination=False`` skips the execution-graph analysis; ``similarity``
+    is the artifact-redundancy backend and ``smell_config`` the smell
+    thresholds (``SmellConfig``, dict of overrides or JSON path).  A run whose
     analysis fails is left out of the coordination summary with a warning;
     when two or more runs all fail with the same exception type, it is raised."""
     per_run = [compute_efficiency(t, pricing) for t in runs.trajectories]
@@ -246,6 +249,7 @@ def analyze_runs(runs: RunSet, pricing: Optional[PricingTable] = None, coordinat
     kinds: set[type] = set()
     if coordination:
         similarity = resolve_similarity(similarity)   # once, not per run
+        smell_config = resolve_smell_config(smell_config)
         per_run_coord = []
         for t, e in zip(runs.trajectories, per_run):
             try:
@@ -272,20 +276,23 @@ def evaluate(swarm: Any, benchmark: Benchmark, trials: int = 1, seed: int = 0, e
              clock_factory: Optional[Callable[[], Clock]] = None, pricing: Optional[PricingTable] = None,
              label: str = "baseline", progress: bool = False, raise_errors: bool = False,
              on_run: Optional[Callable[[Trajectory], None]] = None, capture_text: bool = True,
-             max_text_chars: int = 20000) -> EvaluationResult:
+             max_text_chars: int = 20000, coordination: bool = True, similarity: Any = None,
+             smell_config: Any = None) -> EvaluationResult:
     """Run ``swarm`` on ``benchmark`` ``trials`` times and return an EvaluationResult.
 
     ``swarm`` may be a Swarm instance or class, a ``factory() -> Swarm`` or a
     bare ``run(task, ctx)`` function (sync or async).  ``evaluator``, when
     given, overrides the task and benchmark evaluators.  ``capture_text=False``
     keeps only short previews of prompts, outputs and artifacts.
+    ``coordination``, ``similarity`` and ``smell_config`` are passed to
+    ``analyze_runs``.
     """
     opts = RunOptions(trials=trials, seed=seed, clock_factory=clock_factory, pricing=pricing, evaluator=evaluator,
                       progress=progress, raise_errors=raise_errors, on_run=on_run, capture_text=capture_text,
                       max_text_chars=max_text_chars)
     runs = SwarmRunner(swarm, benchmark, label=label, options=opts).run()
     try:
-        return analyze_runs(runs)
+        return analyze_runs(runs, coordination=coordination, similarity=similarity, smell_config=smell_config)
     except Exception as exc:  # the runs are done (and paid for): hand them back with the plain evaluation
         raise AnalysisFailed(f"coordination analysis failed: {type(exc).__name__}: {exc}", runs,
                              analyze_runs(runs, coordination=False)) from exc

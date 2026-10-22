@@ -93,7 +93,18 @@ def build_benchmark(n_tasks: int = 8) -> Benchmark:
 
 
 class ResearchSwarm(Swarm):
-    """coordinator -> researchers (parallel) -> coordinator -> critic -> coordinator -> synthesizer"""
+    """coordinator -> researchers (parallel) -> coordinator -> critic -> coordinator -> synthesizer
+
+    ``review_rounds`` > 1 repeats the coordinator <-> critic exchange (each
+    extra round: the coordinator asks for a re-check in reply to the
+    critique, the critic replies again), the back-and-forth that the
+    ``agent_ping_pong`` smell looks for.  The default of 1 is the original
+    flow."""
+
+    def __init__(self, review_rounds: int = 1) -> None:
+        if review_rounds < 1:
+            raise ValueError("review_rounds must be >= 1")
+        self.review_rounds = review_rounds
 
     # -- simulation helpers ---------------------------------------------------
     @staticmethod
@@ -183,7 +194,26 @@ class ResearchSwarm(Swarm):
             self._llm(ctx, critic, "Review these findings for errors:\n" + "\n".join(facts), 400,
                       input_artifacts=arts, output=critique)
             critique_art = critic.produce("critique", critique, derived_from=arts)
-            critic.send("coordinator", critique, kind="feedback", artifacts=arts + [critique_art])
+            critic.send("coordinator", critique, kind="feedback", artifacts=arts + [critique_art],
+                        reply_to=msgs[-1] if msgs else None)
+
+        # 4b. optional extra review rounds (no random draws: round 1 decides what is flagged)
+        for rnd in range(2, self.review_rounds + 1):
+            with ctx.agent("coordinator", role="coordinator", model="claude-opus-5") as coord:
+                fb = coord.receive()
+                self._llm(ctx, coord, f"Ask the critic to re-check (round {rnd}):\n{critique}", 80,
+                          input_artifacts=[critique_art], output="Requesting another review pass.")
+                coord.send("critic", f"Please re-check the findings (round {rnd}).", kind="request",
+                           artifacts=arts, reply_to=fb[-1] if fb else None)
+            with ctx.agent("critic", role="critic", model="claude-opus-5") as critic:
+                req = critic.receive()
+                for a in arts:
+                    critic.consume(a, purpose="review")
+                self._llm(ctx, critic, f"Re-check (round {rnd}):\n" + "\n".join(facts), 200,
+                          input_artifacts=arts, output=critique)
+                critique_art = critic.produce("critique", critique, derived_from=arts)
+                critic.send("coordinator", critique, kind="feedback", artifacts=arts + [critique_art],
+                            reply_to=req[-1] if req else None)
 
         # 5. coordinator relays to synthesizer --------------------------------
         with ctx.agent("coordinator", role="coordinator", model="claude-opus-5") as coord:
@@ -213,9 +243,9 @@ class ResearchSwarm(Swarm):
         return answer
 
 
-def make_swarm() -> ResearchSwarm:
+def make_swarm(review_rounds: int = 1) -> ResearchSwarm:
     """Factory used by ``swarmeval.evaluate`` and the CLI."""
-    return ResearchSwarm()
+    return ResearchSwarm(review_rounds=review_rounds)
 
 
 def sim_clock() -> SimClock:

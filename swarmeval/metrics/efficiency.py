@@ -1,8 +1,8 @@
 """Layer 2 -- efficiency: tokens, cost and latency for one trajectory.
 
 Phase 1 reports what was directly recorded: token usage, call counts, cost,
-wall clock time and per-agent time.  Critical path and parallelism analysis
-need the execution graph and are Phase 2 work.
+wall clock time and per-agent time.  Critical path and parallelism need the
+execution graph and live in ``metrics/dependency.py`` (Phase 2).
 """
 from __future__ import annotations
 

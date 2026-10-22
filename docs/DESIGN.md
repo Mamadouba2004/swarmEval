@@ -63,9 +63,9 @@ The core analytical layer: did multiple agents actually produce useful coordinat
 * **Agent contribution** — *observed* (provenance: artifacts consumed downstream, messages used, lineage of the final output) vs *marginal* (ablation). SwarmEval never says "Agent X contributed 12%"; it says "removing Agent X reduced task success by 12 points under this configuration".
 * **Redundant work** (`metrics/redundancy.py`) — duplicate tool calls, similar artifacts, shared sources; *accidental* redundancy distinguished from *intentional verification* (critic/verifier roles, `intent="verification"`) and retries. Tool redundancy = accidental duplicate calls (same tool, same args; strings exact, key order ignored) ÷ tool calls; artifact redundancy (a separate number) = artifacts matching an earlier other-producer artifact by hash or similarity ÷ artifacts. Similarity is pluggable (`swarmeval/similarity.py`): lexical shingle Jaccard by default (stdlib), embeddings via the optional `swarmeval[embeddings]` extra or a user `embed_fn`.
 * **Communication overhead** (`metrics/communication.py`) — message counts and body tokens (attached artifacts excluded: counted once, at production), category split (work product / information / coordination), repeated and broadcast messages, fan-in/out, relay fraction, hub share, used-message ratio. **Communication / Work** = message body tokens as a share of LLM tokens (Σ body ÷ Σ prompt + output). Communication is not automatically waste.
-* **Dependency efficiency** — necessary vs unused edges, depth, fan-in/out, cycles, serial bottlenecks, isolated agents.
-* **Parallelism** — theoretical (dependency-allowed) vs actual overlap; the gap is an optimization opportunity, subject to rate limits and deliberate synchronisation.
-* **Context bloat** — tokens received vs tokens relevant (task + referenced artifacts).
+* **Dependency efficiency** (`metrics/dependency.py`) — critical path (heaviest DAG path, LLM/tool durations), depth (calls on it), cycles (strongly connected groups of ≥3 agents once replies are set aside: a request/response round trip is never a cycle), isolated agents.
+* **Parallelism** (`metrics/dependency.py`) — actual = work ÷ wall, potential = work ÷ critical path, headroom = wall − critical path; *unrecorded* time (wall minus the union of call and wait intervals) is reported separately so idle time is not read as headroom. The gap is an optimization opportunity, subject to rate limits and deliberate synchronisation.
+* **Context bloat** (`metrics/context.py`) — per LLM call, prompt tokens vs tokens traceable to recorded inputs (task + used artifacts + received message bodies + earlier outputs of the span + `system_tokens`). Untracked inputs show up as excess, so the ratio reads "untraceable", not "useless".
 
 ### Layer 4 — Robustness & causality (`causal/`)
 Agent, tool and architecture ablation; failure injection (crash, delay, dropped/corrupted messages, malformed tool output, tool errors, LLM errors, budgets); resilience = success under failure ÷ normal success; quality retention, recovery cost and latency.
@@ -98,7 +98,7 @@ ESLint for agent architectures. Each smell is a *hypothesis from trajectory evid
 | Serialized execution | large gap between potential and actual parallelism |
 | Communication overhead | message tokens are a large share of LLM tokens |
 
-Cross-run aggregation (`diagnostics/engine.py`) reports prevalence.
+Cross-run aggregation (`diagnostics/engine.py`) reports prevalence: each run counts once per smell, agents once per run, grouped by smell, sorted by severity then prevalence. Thresholds (`SmellConfig`, JSON-overridable) are initial guesses; they are to be validated against Phase 3 ablations (does removing the flagged agent / capping the flagged exchange change success and cost as the hypothesis predicts?). Evidence that rests on timing-inferred edges is marked `inferred` and its severity capped. Wording is checked by a test: no causal claims, no "contributed N%".
 
 ## 6. Counterfactual evaluation (`causal/`)
 
@@ -129,7 +129,7 @@ Task = input, expected behaviour, success criteria, constraints, evaluator spec,
 | Phase | Deliverable | Status |
 |---|---|---|
 | 1 Observability & evaluation | reproducible trace + evaluation report | **done** (`schema`, `recorder`, `runner`, `evaluators`, `metrics/performance`, `metrics/efficiency`, `report/text`, `export/jsonl`, `export/parquet`, `compare` (run-to-run comparison, research.md §27), `integrations/anthropic`, CLI incl. `export` and `compare`); sync and async swarms |
-| 2 Coordination analysis | explain where the swarm is inefficient and why | in progress: provenance schema v2, `graph/builder`, `metrics/contribution` (utilization, observed contribution), `metrics/coordination`, `metrics/communication`, `metrics/redundancy`, `similarity` done; dependencies, smells and reports planned (`diagnostics/`) |
+| 2 Coordination analysis | explain where the swarm is inefficient and why | in progress: provenance schema v2; Graph Analyzer (Layer 3: `graph/builder`, `graph/export` Mermaid/DOT/JSON, `metrics/dependency`); utilization, observed contribution, communication, redundancy, context (`metrics/*`, `similarity`); Diagnostic Engine (Layer 3 → report: `diagnostics/smells`, `diagnostics/engine`); COORDINATION / OBSERVED CONTRIBUTION / DIAGNOSTICS text report, coordination rows in `compare`, `swarmeval graph`; standalone HTML report planned |
 | 3 Causal & research features | estimate which components actually matter | planned (`causal/`, confidence intervals in `stats`, `validity`) |
 | 4 Optimization | experimentally validated architecture improvements | planned (`optimize/`) |
 
