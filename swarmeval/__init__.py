@@ -5,8 +5,8 @@ performance/efficiency metrics, run comparison, text reports and
 JSON/JSONL/Parquet export.  Phase 2 (in progress): execution graph,
 utilization, observed contribution, communication overhead, redundancy,
 critical path and parallelism, context bloat and swarm smells
-(``build_graph``, ``compute_coordination``, ``detect_smells``), and graph
-export (Mermaid / DOT / JSON).
+(``build_graph``, ``compute_coordination``, ``detect_smells``), graph
+export (Mermaid / DOT / JSON) and a standalone HTML report (``render_html``).
 
 Quick start::
 
@@ -28,7 +28,7 @@ from .diagnostics import (Diagnostic, DiagnosticsReport, SmellConfig, SmellPreva
 from .similarity import EmbeddingSimilarity, LexicalSimilarity, Similarity, resolve_similarity
 from .graph import ExecutionGraph, build_graph, export_graph, to_dot, to_json, to_mermaid
 from .export import read_events_jsonl, write_events_jsonl
-from .report import render_comparison, render_coordination, render_text, render_trajectory
+from .report import render_comparison, render_coordination, render_html, render_text, render_trajectory
 from .compare import Comparison, compare
 
 __version__ = "0.1.0"
@@ -47,7 +47,7 @@ __all__ = [
     "summarize_diagnostics",
     "ExecutionGraph", "build_graph", "export_graph", "to_mermaid", "to_dot", "to_json",
     "read_events_jsonl", "write_events_jsonl", "render_text", "render_trajectory", "render_comparison",
-    "render_coordination",
+    "render_coordination", "render_html",
     "compare", "Comparison",
     "evaluators", "__version__",
 ]

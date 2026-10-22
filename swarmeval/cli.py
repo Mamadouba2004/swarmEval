@@ -1,8 +1,8 @@
 """Command-line interface.
 
-    swarmeval demo [--trials N] [--out DIR]
+    swarmeval demo [--trials N] [--out DIR] [--html FILE [--run N]]
     swarmeval run --swarm pkg.module:swarm --benchmark bench.json [--trials N] [--out DIR]
-    swarmeval report runs/baseline.json [--trace N] [--pricing prices.json]
+    swarmeval report runs/baseline.json [--trace N] [--pricing prices.json] [--html FILE [--run N]]
     swarmeval export runs/baseline.json events.parquet [--format jsonl|parquet]
     swarmeval compare runs/baseline.json runs/candidate.json [--pricing prices.json] [--out cmp.json]
     swarmeval graph runs/baseline.json [--run N] [--view agents|dag] [--format mermaid|dot|json] [--out F]
@@ -28,6 +28,7 @@ from .graph.export import GRAPH_FORMATS, VIEWS, export_graph
 from .metrics.coordination import compute_coordination
 from .pricing import PricingTable
 from .recorder import SimClock
+from .report.html import render_html
 from .report.text import render_trajectory
 from .schema import Benchmark
 from .similarity import resolve_similarity
@@ -92,6 +93,21 @@ def _write_outputs(result: EvaluationResult, out: Optional[str]) -> None:
     print(f"\nwrote {out}/{result.label}.json and {out}/{result.label}.events.jsonl")
 
 
+def _add_html_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--html", default=None, metavar="FILE", help="also write a standalone HTML report")
+    p.add_argument("--run", type=int, default=0, metavar="N",
+                   help="which run the HTML agent graph and timeline show (default 0)")
+
+
+def _write_html(result: EvaluationResult, args: argparse.Namespace) -> None:
+    if not args.html:
+        return
+    if not 0 <= args.run < len(result.runs):
+        raise SystemExit(f"swarmeval: --run {args.run} out of range (result has {len(result.runs)} runs)")
+    render_html(result, path=args.html, run_index=args.run)
+    print(f"\nwrote HTML report to {args.html}")
+
+
 def _write_plain_evaluation(exc: AnalysisFailed, out: Optional[str]) -> int:
     print(exc.result.report())
     _write_outputs(exc.result, out)
@@ -114,6 +130,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
         print()
         print(render_trajectory(result.runs.trajectories[0]))
     _write_outputs(result, args.out)
+    _write_html(result, args)
     return 0
 
 
@@ -159,6 +176,7 @@ def cmd_report(args: argparse.Namespace) -> int:
             raise SystemExit(f"swarmeval: --trace {args.trace} out of range (file has {len(runs)} runs)")
         print()
         print(render_trajectory(runs.trajectories[args.trace]))
+    _write_html(result, args)
     return code
 
 
@@ -219,6 +237,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     d.add_argument("--trials", type=int, default=3)
     d.add_argument("--out", default=None, help="directory for JSON/JSONL outputs")
     d.add_argument("--trace", action="store_true", help="also print the first trajectory")
+    _add_html_args(d)
     _add_analysis_args(d)
     d.set_defaults(fn=cmd_demo)
 
@@ -240,6 +259,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     rp.add_argument("path")
     rp.add_argument("--trace", type=int, default=None, metavar="N", help="also print trajectory N")
     rp.add_argument("--pricing", default=None, help="re-price every LLM call with this JSON pricing table")
+    _add_html_args(rp)
     _add_analysis_args(rp)
     rp.set_defaults(fn=cmd_report)
 

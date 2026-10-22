@@ -175,6 +175,8 @@ On the demo swarm the report flags `context_bloat` (synthesizer and coordinator)
 
 **Graph export**: `swarmeval graph runs.json [--run N] [--view agents|dag] [--format mermaid|dot|json] [--out FILE]` writes one run's agent graph (token share per agent, dead agents dashed red, timing-inferred edges dashed, edges labelled `kind ×count · tokens`) or work-unit DAG (grouped by agent, critical path highlighted). Mermaid renders on GitHub and mermaid.live; DOT with `dot -Tsvg`. In Python: `to_mermaid(cm.graph, view="agents", coordination=cm)`, `to_dot`, `to_json`.
 
+**HTML report**: `swarmeval demo --html report.html` or `swarmeval report runs.json --html report.html [--run N]` (Python: `render_html(result, path="report.html", run_index=0)`) writes one self-contained page (no scripts, no external resources, light and dark): health dimensions side by side (no overall score), coordination tiles, an SVG agent graph and timeline of run N with the critical path highlighted, the observed-contribution table and the diagnostics.
+
 Repeated trials use seeds derived from `(seed, task, trial)` so a run set is reproducible. Means and spreads are reported; confidence intervals are Phase 3.
 
 ## Outputs
@@ -206,9 +208,9 @@ cmp.improved, cmp.regressed, cmp.is_tradeoff, cmp.flips["lost"]
 ## CLI
 
 ```bash
-swarmeval demo [--trials N] [--out DIR] [--trace]
+swarmeval demo [--trials N] [--out DIR] [--trace] [--html FILE [--run N]]
 swarmeval run    --swarm pkg.mod:factory --benchmark bench.json --trials 3 --out runs [--clock sim] [--pricing p.json] [--no-capture-text]
-swarmeval report runs/baseline.json [--trace N] [--pricing p.json]
+swarmeval report runs/baseline.json [--trace N] [--pricing p.json] [--html FILE [--run N]]
 swarmeval export runs/baseline.json events.parquet [--format jsonl|parquet]
 swarmeval compare runs/flat.json runs/hierarchical.json [--pricing p.json] [--out cmp.json]
 swarmeval graph  runs/baseline.json [--run N] [--view agents|dag] [--format mermaid|dot|json] [--out FILE]
@@ -228,7 +230,7 @@ swarmeval/
   metrics/         performance, efficiency, contribution, communication, redundancy, dependency, context
   diagnostics/     swarm smells and their prevalence over runs
   compare.py       run-to-run comparison
-  report/          text report, comparison report and trajectory trace
+  report/          text and HTML reports, comparison report and trajectory trace
   export/          JSONL and Parquet events
   integrations/    Anthropic SDK adapter
   examples/        simulated research swarm + benchmark used by the demo and tests

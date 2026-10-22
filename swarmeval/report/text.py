@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import textwrap
-from typing import Any, Callable, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 from ..schema import EventType, Trajectory, preview
 from ..stats import Summary
@@ -115,6 +115,11 @@ def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
 # --------------------------------------------------------------------------- #
 _LABEL_W, _VALUE_W = 46, 30
 _SEV_MARK = {"high": "⚠ HIGH", "medium": "⚠ MED ", "low": "· LOW "}
+# Column definitions of the OBSERVED CONTRIBUTION table (text and HTML).
+CONTRIBUTION_NOTES = (
+    "lineage = runs where its artifacts reached the final output; consumed = an artifact used by another agent;",
+    "dead = nothing it sent was used (only over runs with complete provenance); coverage = provenance coverage",
+)
 
 
 def _ranged(s: Optional[Summary], fmt: Callable[[float], str]) -> str:
@@ -136,6 +141,65 @@ def _wrap(prefix: str, text: str, indent: int, width: int = 104) -> List[str]:
     return textwrap.wrap(text, width=width, initial_indent=prefix, subsequent_indent=" " * indent) or [prefix]
 
 
+def coordination_rows(cs: Any) -> List[Optional[Tuple[str, str]]]:
+    """``(label, value)`` rows of the COORDINATION box, ``None`` between
+    groups.  Each label carries its definition in parentheses; the text and
+    HTML reports both render these rows, so the two never disagree."""
+    dep, comm, red, ctx = cs.dependency, cs.communication, cs.redundancy, cs.context
+    sec = lambda x: f"{x:.1f}s"         # noqa: E731
+    times = lambda x: f"{x:.2f}×"       # noqa: E731
+    pct = lambda x: f"{x * 100:.1f}%"  # noqa: E731
+    rows: List[Optional[Tuple[str, str]]] = []
+    if dep is not None:
+        headroom = _ranged(dep.headroom_s, sec)
+        if dep.headroom_ratio is not None:
+            headroom += f"  {dep.headroom_ratio.mean:.2f}×"
+        rows += [
+            ("Critical Path / Run", _ranged(dep.critical_path_s, sec)),
+            ("Actual Parallelism (work ÷ wall)", _ranged(dep.actual_parallelism, times)),
+            ("Potential Parallelism (work ÷ critical path)", _ranged(dep.potential_parallelism, times)),
+            ("Parallel Headroom (wall − critical path)", headroom),
+            ("Unrecorded Time (nothing running)", _ranged(dep.unrecorded_s, sec)),
+            None,
+        ]
+    if comm is not None:
+        hub = _ranged(comm.hub_share, lambda x: f"{x * 100:.0f}%")
+        if comm.hub_agents:
+            top = max(comm.hub_agents.items(), key=lambda kv: (kv[1], kv[0]))[0]
+            hub += f" ({top})"
+        rows += [("Communication / Work (message ÷ LLM tokens)", _ranged(comm.comm_work_ratio, lambda x: f"{x:.3f}")),
+                 ("Hub Share (agent)", hub)]
+    if red is not None:
+        method = ", ".join(sorted(red.methods)) or "none"
+        if red.degraded_runs:
+            method += ", hash only in " + str(red.degraded_runs)
+        rows += [("Redundant Tool Calls (accidental ÷ calls)", _ranged(red.tool_redundancy, pct)),
+                 (f"Redundant Artifacts ({method})", _ranged(red.artifact_redundancy, pct))]
+    if ctx is not None:
+        rows.append(("Context Bloat (received ÷ relevant tokens)", _ranged(ctx.ratio, lambda x: f"{x:.1f}×")))
+        if ctx.worst_ratio is not None and ctx.worst_agents:
+            top = max(ctx.worst_agents.items(), key=lambda kv: (kv[1], kv[0]))[0]
+            rows.append(("  Worst Call / Run (most frequent agent)", f"{ctx.worst_ratio.mean:.1f}× ({top})"))
+    rows += [None,
+             ("Dependency Coverage (receive events)", _ranged(cs.message_receive_coverage, pct)),
+             ("Derivation Coverage (derived_from)", _ranged(cs.derivation_coverage, pct))]
+    return rows
+
+
+def coordination_caveats(cs: Any) -> List[Tuple[bool, str]]:
+    """``(is_warning, text)`` notes that qualify the COORDINATION numbers
+    (shared by the text and HTML reports)."""
+    out: List[Tuple[bool, str]] = []
+    cov = cs.message_receive_coverage
+    if cov is not None and cov.mean < 1.0:
+        out.append((True, f"receive events recorded for {cov.mean * 100:.0f}% of messages: the remaining message "
+                          "edges are inferred from timing; dependencies may be over- or under-counted"))
+    dep = cs.dependency
+    if dep is not None and dep.unrecorded_s is not None and dep.unrecorded_s.mean > 0.05:
+        out.append((False, "unrecorded time is idle or untracked work, not parallel headroom"))
+    return out
+
+
 def _failed_row(result: Any) -> tuple:
     errors = result.coordination_errors
     failed = f"{len(errors)}/{len(result.runs)} runs: {next(iter(errors.values()))}"
@@ -151,55 +215,12 @@ def render_coordination(result: Any) -> str:
     errors = result.coordination_errors
     if cs is None:
         return box("COORDINATION", [_failed_row(result)], width=_LABEL_W + _VALUE_W + 4) if errors else ""
-    dep, comm, red, ctx = cs.dependency, cs.communication, cs.redundancy, cs.context
-    sec = lambda x: f"{x:.1f}s"         # noqa: E731
-    times = lambda x: f"{x:.2f}×"       # noqa: E731
-    pct = lambda x: f"{x * 100:.1f}%"  # noqa: E731
     rows: List[Any] = [f"{cs.n_runs} runs  ·  values are means over runs (range)", None]
     if errors:
         rows += [_failed_row(result), None]
-    if dep is not None:
-        headroom = _ranged(dep.headroom_s, sec)
-        if dep.headroom_ratio is not None:
-            headroom += f"  {dep.headroom_ratio.mean:.2f}×"
-        rows += [
-            _row("Critical Path / Run", _ranged(dep.critical_path_s, sec)),
-            _row("Actual Parallelism (work ÷ wall)", _ranged(dep.actual_parallelism, times)),
-            _row("Potential Parallelism (work ÷ critical path)", _ranged(dep.potential_parallelism, times)),
-            _row("Parallel Headroom (wall − critical path)", headroom),
-            _row("Unrecorded Time (nothing running)", _ranged(dep.unrecorded_s, sec)),
-            None,
-        ]
-    if comm is not None:
-        hub = _ranged(comm.hub_share, lambda x: f"{x * 100:.0f}%")
-        if comm.hub_agents:
-            top = max(comm.hub_agents.items(), key=lambda kv: (kv[1], kv[0]))[0]
-            hub += f" ({top})"
-        rows += [_row("Communication / Work (message ÷ LLM tokens)", _ranged(comm.comm_work_ratio,
-                                                                             lambda x: f"{x:.3f}")),
-                 _row("Hub Share (agent)", hub)]
-    if red is not None:
-        method = ", ".join(sorted(red.methods)) or "none"
-        if red.degraded_runs:
-            method += ", hash only in " + str(red.degraded_runs)
-        rows += [_row("Redundant Tool Calls (accidental ÷ calls)", _ranged(red.tool_redundancy, pct)),
-                 _row(f"Redundant Artifacts ({method})", _ranged(red.artifact_redundancy, pct))]
-    if ctx is not None:
-        rows.append(_row("Context Bloat (received ÷ relevant tokens)",
-                         _ranged(ctx.ratio, lambda x: f"{x:.1f}×")))
-        if ctx.worst_ratio is not None and ctx.worst_agents:
-            top = max(ctx.worst_agents.items(), key=lambda kv: (kv[1], kv[0]))[0]
-            rows.append(_row("  Worst Call / Run (most frequent agent)", f"{ctx.worst_ratio.mean:.1f}× ({top})"))
-    rows += [None,
-             _row("Dependency Coverage (receive events)", _ranged(cs.message_receive_coverage, pct)),
-             _row("Derivation Coverage (derived_from)", _ranged(cs.derivation_coverage, pct))]
+    rows += [None if r is None else _row(*r) for r in coordination_rows(cs)]
     parts = [box("COORDINATION", rows, width=_LABEL_W + _VALUE_W + 4)]
-    cov = cs.message_receive_coverage
-    if cov is not None and cov.mean < 1.0:
-        parts.append(f"  ⚠ receive events recorded for {cov.mean * 100:.0f}% of messages: the remaining message "
-                     "edges are inferred from timing; dependencies may be over- or under-counted")
-    if dep is not None and dep.unrecorded_s is not None and dep.unrecorded_s.mean > 0.05:
-        parts.append("  unrecorded time is idle or untracked work, not parallel headroom")
+    parts += [("  ⚠ " if warn else "  ") + text for warn, text in coordination_caveats(cs)]
 
     if cs.contribution:
         aw = max([16] + [len(a) + 1 for a in cs.contribution])
@@ -216,10 +237,7 @@ def render_coordination(result: Any) -> str:
             parts.append(f"  {aid:<{aw}}{c['lineage_rate'] * 100:>8.0f}%{c['consumed_rate'] * 100:>9.0f}%"
                          f"{dead_s:>9}{cov_txt:>10}  "
                          + (f"{bar(share)} {share * 100:>3.0f}%" if share is not None else "unknown"))
-        parts.append("  lineage = runs where its artifacts reached the final output; consumed = an artifact used "
-                     "by another agent;")
-        parts.append("  dead = nothing it sent was used (only over runs with complete provenance); "
-                     "coverage = provenance coverage")
+        parts += ["  " + note for note in CONTRIBUTION_NOTES]
 
     diag = cs.diagnostics
     if diag is not None:
