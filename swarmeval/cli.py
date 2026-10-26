@@ -190,7 +190,11 @@ def cmd_graph(args: argparse.Namespace) -> int:
         raise SystemExit(f"swarmeval: --run {args.run} out of range (file has {len(runs)} runs)")
     traj = runs.trajectories[args.run]
     graph = build_graph(traj)
-    cm = compute_coordination(traj, graph=graph)
+    kw = _analysis_kwargs(args)
+    cm = None
+    if kw["coordination"]:
+        cm = compute_coordination(traj, graph=graph, similarity=kw["similarity"],
+                                  smell_config=kw["smell_config"])
     text = export_graph(graph, args.format, view=args.view, coordination=cm)
     if args.out:
         with open(args.out, "w") as f:
@@ -256,6 +260,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="agents: who talked to whom; dag: work units and the critical path")
     g.add_argument("--format", choices=sorted(GRAPH_FORMATS), default="mermaid")
     g.add_argument("--out", default=None, help="output file (default: stdout)")
+    _add_analysis_args(g)
     g.set_defaults(fn=cmd_graph)
 
     args = p.parse_args(argv)
