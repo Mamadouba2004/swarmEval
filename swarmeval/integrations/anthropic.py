@@ -13,6 +13,7 @@
 The ``anthropic`` package is only imported when a client is not supplied.
 Calls from threads that do not carry the span's context (a bare
 ``ThreadPoolExecutor``) cannot be attributed; use ``ctx.parallel``.
+Streaming (``stream=True``) is not instrumented yet: such calls pass through unrecorded.
 """
 from __future__ import annotations
 
@@ -110,6 +111,8 @@ def _fill(call: LLMCall, resp: Any) -> None:
 def _wrap(original: Callable[..., Any]) -> Callable[..., Any]:
     if _is_async(original):
         async def acreate(*args: Any, **kwargs: Any) -> Any:
+            if kwargs.get("stream"):
+                return await original(*args, **kwargs)
             active = _current_llm_call.get()
             if active is not None:
                 resp = await original(*args, **kwargs)
@@ -126,6 +129,8 @@ def _wrap(original: Callable[..., Any]) -> Callable[..., Any]:
         return acreate
 
     def create(*args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("stream"):
+            return original(*args, **kwargs)
         active = _current_llm_call.get()
         if active is not None:
             resp = original(*args, **kwargs)
