@@ -242,13 +242,17 @@ class SwarmRunner:
         rs = RunSet(self.label, self.benchmark.name)
         total = len(self.benchmark.tasks) * self.options.trials
         done = 0
-        for trial in range(self.options.trials):
-            for task in self.benchmark.tasks:
-                rs.trajectories.append(self.run_task(task, trial))
-                done += 1
-                if self.options.progress:
-                    sys.stderr.write(f"\r[{self.label}] {done}/{total} runs")
-                    sys.stderr.flush()
+        try:
+            for trial in range(self.options.trials):
+                for task in self.benchmark.tasks:
+                    rs.trajectories.append(self.run_task(task, trial))
+                    done += 1
+                    if self.options.progress:
+                        sys.stderr.write(f"\r[{self.label}] {done}/{total} runs")
+                        sys.stderr.flush()
+        except KeyboardInterrupt:  # keep the finished runs; the interrupted one is dropped
+            rs.metadata["interrupted"] = True
+            rs.metadata["planned_runs"] = total
         if self.options.progress:
             sys.stderr.write("\n")
         return rs

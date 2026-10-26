@@ -66,6 +66,9 @@ def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
         rows.append(("Runs Crashed", f"{perf.run_errors}/{n_runs}", "⚠"))
     if perf.evaluator_errors:
         rows.append(("Evaluator Errors", f"{perf.evaluator_errors}/{n_runs}", "⚠"))
+    if result.runs.metadata.get("interrupted"):
+        planned = result.runs.metadata.get("planned_runs", n_runs)
+        rows.append(("Runs", f"interrupted after {n_runs}/{planned} runs", "⚠"))
     rows += [
         None,
         ("Cost / Run", _money(result.cost["per_run"], eff.cost_complete)),
