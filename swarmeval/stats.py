@@ -23,26 +23,6 @@ def stdev(xs: Sequence[float]) -> float:
     return math.sqrt(sum((x - m) ** 2 for x in xs) / (len(xs) - 1))
 
 
-def median(xs: Sequence[float]) -> float:
-    xs = sorted(xs)
-    if not xs:
-        return 0.0
-    n = len(xs)
-    mid = n // 2
-    return xs[mid] if n % 2 else (xs[mid - 1] + xs[mid]) / 2.0
-
-
-def percentile(xs: Sequence[float], p: float) -> float:
-    xs = sorted(xs)
-    if not xs:
-        return 0.0
-    k = (len(xs) - 1) * p
-    lo, hi = math.floor(k), math.ceil(k)
-    if lo == hi:
-        return xs[int(k)]
-    return xs[lo] + (xs[hi] - xs[lo]) * (k - lo)
-
-
 @dataclass
 class Summary:
     """Descriptive summary of one metric over a set of runs."""

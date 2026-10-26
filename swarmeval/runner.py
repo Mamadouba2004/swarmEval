@@ -139,12 +139,6 @@ class RunSet:
             out.setdefault(t.task_id, []).append(t)
         return out
 
-    def get(self, task_id: str, trial: int) -> Optional[Trajectory]:
-        for t in self.trajectories:
-            if t.task_id == task_id and t.trial == trial:
-                return t
-        return None
-
     def to_dict(self) -> Dict[str, Any]:
         return {"label": self.label, "benchmark_name": self.benchmark_name,
                 "trajectories": [t.to_dict() for t in self.trajectories], "metadata": self.metadata}

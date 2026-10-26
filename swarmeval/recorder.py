@@ -337,9 +337,6 @@ class RunContext:
             self.trajectory.events.append(ev)
         return ev
 
-    def annotate(self, note: str, **metadata: Any) -> Event:
-        return self.record(EventType.ANNOTATION, content=self._text(note), metadata=metadata)
-
     def _text(self, obj: Any) -> Any:
         return self.text_policy.apply(obj)
 

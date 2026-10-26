@@ -15,7 +15,7 @@ import math
 import uuid
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 # Version of the recorded data, stored as ``trajectory.metadata["schema_version"]``.
@@ -402,11 +402,6 @@ class Benchmark:
                 tasks = [Task.from_dict(json.loads(line)) for line in f if line.strip()]
                 return cls(name=path, tasks=tasks)
             return cls.from_dict(json.load(f))
-
-    def subset(self, task_ids: Iterable[str]) -> "Benchmark":
-        ids = set(task_ids)
-        return Benchmark(self.name, [t for t in self.tasks if t.task_id in ids],
-                         self.default_evaluator, dict(self.metadata))
 
 
 # --------------------------------------------------------------------------- #

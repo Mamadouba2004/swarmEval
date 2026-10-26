@@ -27,9 +27,6 @@ class Evaluator:
         """Raise ``ValueError`` if this evaluator cannot judge ``task`` (e.g. it
         has nothing to compare against).  Called by ``Benchmark.validate``."""
 
-    def __call__(self, task: Task, output: Any, trajectory: Optional[Trajectory] = None) -> Evaluation:
-        return self.evaluate(task, output, trajectory)
-
 
 # --------------------------------------------------------------------------- #
 # Deterministic evaluators
