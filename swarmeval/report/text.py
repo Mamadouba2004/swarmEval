@@ -30,7 +30,9 @@ def _spread(s: Summary, unit: str = "", digits: int = 1) -> str:
 
 
 def box(title: str, rows: Sequence[Any], width: int = 58) -> str:
-    longest = max([len(r) + 3 for r in rows if isinstance(r, str)] + [width])
+    longest = max([len(r) + 3 for r in rows if isinstance(r, str)]
+                  + [max(28, len(r[0])) + len(r[1]) + len(r[2] if len(r) > 2 else "") + 6
+                     for r in rows if isinstance(r, tuple)] + [width])
     inner = max(width, longest) - 2
     out = ["╭" + "─" * inner + "╮", "│" + title.center(inner) + "│", "├" + "─" * inner + "┤"]
     for row in rows:
