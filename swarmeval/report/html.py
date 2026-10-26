@@ -177,6 +177,21 @@ def _layout(graph: ExecutionGraph, first: Dict[str, float]) -> Dict[str, Tuple[f
     return pos
 
 
+def _edge_clear(sx: float, sy: float, tx: float, ty: float, qx: float, qy: float,
+                pos: Dict[str, Tuple[float, float]], skip: Tuple[str, str]) -> bool:
+    """True when the clipped quadratic curve stays out of every node box but its own ends."""
+    x1, y1 = _clip(sx, sy, qx, qy)
+    x2, y2 = _clip(tx, ty, qx, qy)
+    for i in range(1, 50):
+        t = i / 50
+        px = (1 - t) ** 2 * x1 + 2 * t * (1 - t) * qx + t * t * x2
+        py = (1 - t) ** 2 * y1 + 2 * t * (1 - t) * qy + t * t * y2
+        for a, (nx, ny) in pos.items():
+            if a not in skip and nx <= px <= nx + _NODE_W and ny <= py <= ny + _NODE_H:
+                return False
+    return True
+
+
 def _clip(cx: float, cy: float, tx: float, ty: float) -> Tuple[float, float]:
     """Point where the ray from a node centre towards (tx, ty) leaves the node box."""
     dx, dy = tx - cx, ty - cy
@@ -222,13 +237,25 @@ def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: Optional["Coordinatio
         # Bend each edge to its left by an amount set by its kind: the reply
         # edge (opposite direction) bends the other way and parallel kinds
         # fan out, so no two edges of a pair overlap.
-        # Edges that skip columns bend further so they pass around, not
-        # through, the agents in between.
+        # Edges that skip columns bend further; any edge whose default curve
+        # still crosses another agent's box searches signed bends of growing
+        # magnitude for the first one that clears every box.
         dx, dy = tx - sx, ty - sy
         length = math.hypot(dx, dy) or 1.0
         skipped = max(0, int(round(abs(dx) / _COL_W)) - 1)
         bend = 16 * (1 + _KIND_ORDER.index(kind)) + 70 * skipped
-        qx, qy = (sx + tx) / 2 - dy / length * bend, (sy + ty) / 2 + dx / length * bend
+        mx0, my0 = (sx + tx) / 2, (sy + ty) / 2
+        qx, qy = mx0 - dy / length * bend, my0 + dx / length * bend
+        if not _edge_clear(sx, sy, tx, ty, qx, qy, pos, (e.source, e.target)):
+            for mag in range(20, 400, 10):
+                for b in (mag, -mag):
+                    cx_, cy_ = mx0 - dy / length * b, my0 + dx / length * b
+                    if _edge_clear(sx, sy, tx, ty, cx_, cy_, pos, (e.source, e.target)):
+                        bend, qx, qy = b, cx_, cy_
+                        break
+                else:
+                    continue
+                break
         x1, y1 = _clip(sx, sy, qx, qy)
         x2, y2 = _clip(tx, ty, qx, qy)
         xs.append(0.25 * x1 + 0.5 * qx + 0.25 * x2)
