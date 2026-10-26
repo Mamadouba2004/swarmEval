@@ -129,7 +129,7 @@ def _ranged(s: Optional[Summary], fmt: Callable[[float], str]) -> str:
 
 
 def _row(label: str, value: str) -> str:
-    return f"{label:<{_LABEL_W}}{value[:_VALUE_W]:>{_VALUE_W}}"
+    return f"{label:<{_LABEL_W}}{value:>{_VALUE_W}}"
 
 
 def _wrap(prefix: str, text: str, indent: int, width: int = 104) -> List[str]:
@@ -193,8 +193,9 @@ def render_coordination(result: Any) -> str:
         parts.append("  unrecorded time is idle or untracked work, not parallel headroom")
 
     if cs.contribution:
+        aw = max([16] + [len(a) + 1 for a in cs.contribution])
         parts += ["", "OBSERVED CONTRIBUTION (provenance, not marginal effect)",
-                  f"  {'agent':<16}{'lineage':>9}{'consumed':>10}{'dead':>9}{'coverage':>10}"
+                  f"  {'agent':<{aw}}{'lineage':>9}{'consumed':>10}{'dead':>9}{'coverage':>10}"
                   "  utilization (tokens)"]
         util = cs.utilization
         for aid, c in cs.contribution.items():
@@ -204,7 +205,7 @@ def render_coordination(result: Any) -> str:
             # built outside the f-string: reusing its quote inside needs Python 3.12+
             dead_s = "unknown" if dead is None else f"{dead * 100:.0f}%"
             cov_txt = "unknown" if cov_s is None else f"{cov_s['mean'] * 100:.0f}%"
-            parts.append(f"  {aid[:15]:<16}{c['lineage_rate'] * 100:>8.0f}%{c['consumed_rate'] * 100:>9.0f}%"
+            parts.append(f"  {aid:<{aw}}{c['lineage_rate'] * 100:>8.0f}%{c['consumed_rate'] * 100:>9.0f}%"
                          f"{dead_s:>9}{cov_txt:>10}  "
                          + (f"{bar(share)} {share * 100:>3.0f}%" if share is not None else "unknown"))
         parts.append("  lineage = runs where its artifacts reached the final output; consumed = an artifact used "
