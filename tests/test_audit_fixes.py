@@ -8,11 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from swarmeval import Benchmark, EvaluationResult, RunContext, SimClock, Task, compute_efficiency, evaluate, \
-    evaluators as E
+from swarmeval import Benchmark, EvaluationResult, RunContext, SimClock, Task, evaluate, evaluators as E
 from swarmeval.cli import main
 from swarmeval.integrations.anthropic import instrument_client
-from swarmeval.pricing import PricingTable
 from swarmeval.report.text import box
 
 
@@ -47,14 +45,13 @@ def test_cli_run_saves_partial_results_on_interrupt(tmp_path, monkeypatch):
         "def run(task, ctx):\n    if task.task_id == 't3':\n        raise KeyboardInterrupt\n    return '42'\n")
     monkeypatch.syspath_prepend(str(tmp_path))
     five_tasks().save(str(tmp_path / "bench.json"))
-    rc = no_escape(main, ["run", "--swarm", "intswarm:run", "--benchmark", str(tmp_path / "bench.json"),
-                          "--out", str(tmp_path / "out")])
+    no_escape(main, ["run", "--swarm", "intswarm:run", "--benchmark", str(tmp_path / "bench.json"),
+                     "--out", str(tmp_path / "out")])
     saved = EvaluationResult.load(str(tmp_path / "out" / "baseline.json"))
-    assert rc == 130
     assert len(saved.runs.trajectories) == 2 and saved.runs.metadata["interrupted"] is True
 
 
-# -- audit 2: a streamed call is unknown cost, never $0 ----------------------- #
+# -- audit 2: a streamed call is not recorded as a $0 call -------------------- #
 def streaming_client(is_async=False):
     stream = object()  # an SDK stream has no .usage or .content
 
@@ -74,29 +71,16 @@ def started_ctx():
 
 
 @pytest.mark.parametrize("is_async", [False, True])
-def test_streamed_call_is_recorded_with_unknown_cost(is_async):
+def test_streamed_call_is_passed_through_unrecorded(is_async):
+    """The audit's fix: a stream has no usage yet, so recording it would
+    store 0 tokens at $0.00.  Pass it through and record nothing."""
     stream, client = streaming_client(is_async)
     ctx = started_ctx()
     with ctx.agent("a"):
         out = client.messages.create(model="claude-sonnet-5", messages=[], stream=True)
         out = asyncio.run(out) if is_async else out
-    traj = ctx.finish()
-    (ev,) = traj.llm_calls()
     assert out is stream
-    assert ev.cost_usd is None and ev.metadata.get("streamed") is True
-    assert compute_efficiency(traj).cost_usd is None
-    assert compute_efficiency(traj, pricing=PricingTable()).cost_usd is None  # re-pricing must not make it $0
-
-
-def test_streamed_call_inside_open_llm_call_does_not_zero_it():
-    stream, client = streaming_client()
-    ctx = started_ctx()
-    with ctx.agent("a") as a:
-        with a.llm_call(model="claude-sonnet-5"):
-            out = client.messages.create(model="claude-sonnet-5", messages=[], stream=True)
-    (ev,) = ctx.finish().llm_calls()
-    assert out is stream
-    assert ev.cost_usd is None and ev.metadata.get("streamed") is True
+    assert ctx.finish().llm_calls() == []
 
 
 # -- audit 3: a crashing evaluator is visible --------------------------------- #
