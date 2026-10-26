@@ -19,6 +19,7 @@ class PerformanceMetrics:
     mean_score: float = 0.0
     constraint_pass_rate: Optional[float] = None
     run_errors: int = 0
+    evaluator_errors: int = 0
     per_task: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     per_trial: List[float] = field(default_factory=list)
     evaluators: List[str] = field(default_factory=list)
@@ -28,7 +29,8 @@ class PerformanceMetrics:
             "n_runs": self.n_runs, "n_tasks": self.n_tasks, "trials": self.trials,
             "n_successes": self.n_successes, "success_rate": self.success_rate,
             "mean_score": self.mean_score, "constraint_pass_rate": self.constraint_pass_rate,
-            "run_errors": self.run_errors, "per_task": self.per_task, "per_trial": self.per_trial,
+            "run_errors": self.run_errors, "evaluator_errors": self.evaluator_errors,
+            "per_task": self.per_task, "per_trial": self.per_trial,
             "evaluators": self.evaluators,
         }
 
@@ -50,6 +52,8 @@ def compute_performance(trajectories: Sequence[Trajectory],
     if cons:
         pm.constraint_pass_rate = sum(1 for c in cons if c) / len(cons)
     pm.run_errors = sum(1 for t in trajectories if t.status != "success")
+    pm.evaluator_errors = sum(1 for t in trajectories if t.evaluation
+                              and str(t.evaluation.details.get("reason", "")).startswith("evaluator error"))
     if per_run is not None:
         costs = [(e.cost_usd, e.cost_complete) for e in per_run]
     else:

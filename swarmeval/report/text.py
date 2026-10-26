@@ -64,6 +64,8 @@ def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
         rows.append(("Constraint Pass", _pct(perf.constraint_pass_rate)))
     if perf.run_errors:
         rows.append(("Runs Crashed", f"{perf.run_errors}/{n_runs}", "⚠"))
+    if perf.evaluator_errors:
+        rows.append(("Evaluator Errors", f"{perf.evaluator_errors}/{n_runs}", "⚠"))
     rows += [
         None,
         ("Cost / Run", _money(result.cost["per_run"], eff.cost_complete)),
