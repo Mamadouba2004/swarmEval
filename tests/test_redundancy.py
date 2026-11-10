@@ -164,6 +164,20 @@ def test_artifact_redundancy_degraded_without_text():
     assert r.redundant_artifacts == 1
 
 
+def test_forwarded_artifact_is_not_redundant():
+    """A coordinator re-producing the answer a worker sent it is passing it on."""
+    ctx = make_ctx()
+    with ctx.agent("worker") as w:
+        ans = w.produce("answer", "Aurora was first released in 2015 by Tern", derived_from=[])
+        w.send("lead", "done", kind="result", artifacts=[ans])
+    ctx.clock.advance(1.0)
+    with ctx.agent("lead") as lead:
+        lead.receive()
+        lead.produce("final", "Aurora was first released in 2015 by Tern")
+    r = compute_redundancy(ctx.finish())
+    assert r.artifacts == 2 and r.redundant_artifacts == 0
+
+
 def test_artifact_redundancy_with_embeddings():
     """Any backend plugs in; this fake embedding calls every 'Aurora' text the same."""
     emb = EmbeddingSimilarity(embed_fn=lambda texts: [[1.0, 0.0] if "aurora" in t.lower() else [0.0, 1.0]

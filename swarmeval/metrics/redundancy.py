@@ -21,8 +21,8 @@ Two separate numbers, never merged:
 * **artifact redundancy** = accidentally redundant artifacts ÷ artifacts.  An
   artifact is redundant when an earlier artifact from a *different* producer
   has the same content hash or is similar (``similarity`` backend, default
-  lexical).  A copy of an artifact its producer derived from or consumed is
-  not redundant work, and a verification producer's artifact counts as
+  lexical).  A copy of an artifact its producer derived from, consumed or
+  received by message is not redundant work, and a verification producer's artifact counts as
   intentional.  ``method`` names how text was compared; ``degraded`` is True
   when artifact text was not captured, so only exact hashes were compared.
 
@@ -202,10 +202,13 @@ def _artifact_redundancy(traj: Trajectory, out: RedundancyMetrics, similarity: A
             matches[hi].setdefault(lo, s)
         out.similarity_truncated = bool(getattr(sim, "truncated", False))
 
-    # what each agent consumed, and when (copying an input is not redundant work)
+    # what each agent consumed or received, and when (copying an input is not
+    # redundant work; re-producing an artifact received by message forwards it)
     consumed: Dict[Tuple[str, Optional[str]], List[float]] = defaultdict(list)
+    inputs = (EventType.ARTIFACT_USE.value, EventType.LLM_CALL.value, EventType.TOOL_CALL.value,
+              EventType.MESSAGE_RECEIVE.value)
     for ev in traj.events:
-        if ev.event_type in (EventType.ARTIFACT_USE.value, EventType.LLM_CALL.value, EventType.TOOL_CALL.value):
+        if ev.event_type in inputs:
             for a in ev.input_artifacts:
                 consumed[(a, ev.agent_id)].append(ev.timestamp)
 
