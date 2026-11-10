@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from ..graph.builder import EPS
-from ..metrics.dependency import REQUEST_KINDS
+from ..metrics.dependency import REQUEST_KINDS, reply_flags
 from ..metrics.redundancy import VERIFICATION_ROLES, is_verification, tool_key
 from ..schema import MessageKind, Trajectory, to_text
 from ..similarity import LexicalSimilarity
@@ -250,20 +250,31 @@ def _redundant_delegation(c: _Ctx) -> None:
 
 
 def _ping_pong(c: _Ctx) -> None:
+    """Counts changes of direction in the longest back-and-forth of a pair.  A
+    new request (one that answers nothing) starts a fresh exchange, so a run of
+    delegated tasks, each answered once, is a series of round trips."""
     cfg = c.cfg
-    seq = {ev.event_id: i for i, ev in enumerate(c.traj.events)}
     pairs: Dict[Tuple[str, str], List[str]] = defaultdict(list)
-    for m in sorted(c.traj.messages(), key=lambda m: (m.timestamp, seq[m.event_id])):
+    longest: Dict[Tuple[str, str], int] = defaultdict(int)
+    run: Dict[Tuple[str, str], int] = defaultdict(int)
+    for m, is_reply in reply_flags(c.traj):
         if m.sender and m.receiver and m.sender != m.receiver:
             a, b = c.order((m.sender, m.receiver))
-            pairs[(a, b)].append(m.sender)
+            senders = pairs[(a, b)]
+            if m.kind in REQUEST_KINDS and not is_reply:
+                run[(a, b)] = 0
+            elif senders and senders[-1] != m.sender:
+                run[(a, b)] += 1
+                longest[(a, b)] = max(longest[(a, b)], run[(a, b)])
+            senders.append(m.sender)
     for (a, b), senders in pairs.items():
-        alternations = sum(1 for x, y in zip(senders, senders[1:]) if x != y)
+        alternations = longest[(a, b)]
         if alternations < cfg.pingpong_min_alternations:
             continue
         sev = "high" if alternations >= cfg.pingpong_high else "medium"
         c.add("agent_ping_pong", sev, [a, b],
-              f"{a} and {b} exchanged {len(senders)} messages with {alternations} changes of direction.",
+              f"{a} and {b} exchanged {len(senders)} messages; their longest back-and-forth had {alternations} "
+              f"changes of direction.",
               "Repeated back-and-forth may indicate repeated corrections or an unclear hand-off; a deliberate "
               "review loop looks the same in the record.",
               f"Re-run with the {a}–{b} exchange capped at one round (or with explicit acceptance criteria) "

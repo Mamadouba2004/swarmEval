@@ -120,6 +120,19 @@ def test_ping_pong_thresholds():
     assert not of(exchange(7, smell_config={"pingpong_min_alternations": 7}), "agent_ping_pong")
 
 
+def test_sequential_delegation_is_not_ping_pong():
+    ctx = make_ctx()
+    for i in range(6):                    # six new tasks, each answered: round trips, not back-and-forth
+        with ctx.agent("boss") as b:
+            b.receive()
+            b.send("worker", f"task {i}", kind="task_assignment")
+        with ctx.agent("worker") as w:
+            w.receive()
+            llm(w)
+            w.send("boss", f"done {i}", kind="result")
+    assert not of(compute_coordination(ctx.finish()), "agent_ping_pong")
+
+
 def test_redundant_delegation_from_several_senders():
     ctx = make_ctx()
     for boss in ("lead_1", "lead_2"):
