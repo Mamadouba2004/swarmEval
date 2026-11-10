@@ -102,8 +102,8 @@ class AgentEdge:
 @dataclass
 class MessageLink:
     """What became of one message.  ``receive_node`` is the recorded receive
-    or, without one, the receiver's first unit after the send (``received``
-    False); ``None`` means it never reached the receiver.  A message carrying
+    or, for Phase 1 data without one, the receiver's first unit after the send
+    (``received`` False); ``None`` means it never reached the receiver.  A message carrying
     artifacts is ``used`` when the receiver consumed one of them; one without
     artifacts counts as used when the receiver did any LLM/tool work after
     receiving it -- a timing heuristic, flagged ``used_inferred``."""
@@ -448,7 +448,8 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
        frontier at the child's start, and the parent's next units on the
        child's last units;
     4. *message*: send -> recorded receive (matched by message id); without
-       one, send -> the receiver's first unit after the send (``inferred``);
+       one, in Phase 1 data only, send -> the receiver's first unit after the
+       send (``inferred``);
     5. *artifact*: produce -> genuine consumption only (ARTIFACT_USE, an
        LLM/tool call's ``input_artifacts``, another artifact's
        ``derived_from``); carrying an artifact in a message is not using it;
@@ -507,8 +508,9 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
         target: Optional[WorkUnit] = None
         if rcv is not None and b.add_edge(s, rcv, "message", ref=ev.message_id):
             target = rcv
-        else:
-            rcv = None
+        elif b.version is None:
+            # Phase 1 data has no receive events: infer delivery from timing.
+            # Schema v2 records every receive, so without one it never arrived.
             cands = by_agent.get(ev.receiver or "", [])
             i = bisect_left(starts.get(ev.receiver or "", []), s.start - EPS)
             for cand in cands[i:]:
@@ -517,6 +519,7 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
                     break
             if target is not None:
                 b.add_edge(s, target, "message", inferred=True, ref=ev.message_id)
+        received = target is not None and target is rcv
         arts = list(ev.input_artifacts)
         used, used_inferred = False, False
         if target is not None:
@@ -528,7 +531,7 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
                            for x in by_agent.get(ev.receiver or "", []))
                 used_inferred = used
         links.append(MessageLink(s.node_id, target.node_id if target else None, ev.message_id, ev.sender,
-                                 ev.receiver, ev.kind, ev.content_tokens, arts, rcv is not None, used,
+                                 ev.receiver, ev.kind, ev.content_tokens, arts, received, used,
                                  used_inferred))
 
     # waits (rule 6) -------------------------------------------------------------
