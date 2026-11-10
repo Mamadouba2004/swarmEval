@@ -131,6 +131,14 @@ def test_interrupted_run_is_flagged_in_compare_and_html():
     assert "interrupted" not in render_html(full)
 
 
+def test_interrupted_html_header_and_per_trial_tile_are_honest():
+    """PR #8 review round 2: the HTML header still said "5 tasks × 2 trials =
+    7 runs" and the per-trial tile did not say a trial was left out."""
+    page = render_html(interrupted_in_second_trial())
+    assert "7/10 runs (interrupted)" in page and "5 tasks × 2 trials" not in page
+    assert "100.0%  (incomplete trial excluded)" in page
+
+
 # -- audit 2: a streamed call is not recorded as a $0 call -------------------- #
 def streaming_client(is_async=False):
     stream = object()  # an SDK stream has no .usage or .content

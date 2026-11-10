@@ -23,7 +23,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Set, Tupl
 from ..graph.builder import ExecutionGraph, build_graph
 from ..graph.export import _edge_label, _inferred
 from ..schema import Event, Trajectory
-from .text import (CONTRIBUTION_NOTES, _money, _pct, _spread, coordination_caveats, coordination_rows)
+from .text import (CONTRIBUTION_NOTES, _money, _pct, _per_trial, _run_shape, _spread, coordination_caveats,
+                   coordination_rows)
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..metrics.coordination import CoordinationMetrics
@@ -427,7 +428,7 @@ def _phase1(result: Any) -> List[str]:
     if perf.run_errors:
         perf_tiles.append(_tile("Runs Crashed", f"{perf.run_errors}/{n_runs}"))
     if perf.trials > 1:
-        perf_tiles.append(_tile("Per-trial Success", ", ".join(_pct(x) for x in perf.per_trial)))
+        perf_tiles.append(_tile("Per-trial Success", _per_trial(perf)))
     out = ["<h2>Performance</h2>", _tiles(perf_tiles)]
     if result.runs.metadata.get("interrupted"):
         planned = result.runs.metadata.get("planned_runs", n_runs)
@@ -572,7 +573,7 @@ def render_html(result: Any, path: Optional[str] = None, run_index: int = 0) -> 
     title = f"SwarmEval · {result.label}"
     body: List[str] = [
         f"<h1>{_e(title)}</h1>",
-        f'<div class="sub">{_e(result.benchmark)} · {perf.n_tasks} tasks × {perf.trials} trials = {n_runs} runs · '
+        f'<div class="sub">{_e(result.benchmark)} · {_e(_run_shape(result))} · '
         "health dimensions are reported separately; there is no overall score</div>",
     ]
     body += _phase1(result)

@@ -51,15 +51,27 @@ def box(title: str, rows: Sequence[Any], width: int = 58) -> str:
     return "\n".join(out)
 
 
+def _run_shape(result: Any) -> str:
+    """Report header shape; an interrupted set shows finished/planned runs."""
+    n_runs = len(result.runs)
+    if result.runs.metadata.get("interrupted"):
+        return f"{n_runs}/{result.runs.metadata.get('planned_runs', n_runs)} runs (interrupted)"
+    perf = result.performance
+    return f"{perf.n_tasks} tasks × {perf.trials} trials = {n_runs} runs"
+
+
+def _per_trial(perf: Any) -> str:
+    return (", ".join(_pct(x) for x in perf.per_trial)
+            + ("  (incomplete trial excluded)" if len(perf.per_trial) < perf.trials else ""))
+
+
 def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
                 show_coordination: bool = True) -> str:
     perf, eff = result.performance, result.efficiency
     n_runs = len(result.runs)
     planned = result.runs.metadata.get("planned_runs", n_runs)
-    shape = (f"{n_runs}/{planned} runs (interrupted)" if result.runs.metadata.get("interrupted")
-             else f"{perf.n_tasks} tasks × {perf.trials} trials = {n_runs} runs")
     rows: List[Any] = [
-        f"{result.label}  ·  {result.benchmark}  ·  {shape}",
+        f"{result.label}  ·  {result.benchmark}  ·  {_run_shape(result)}",
         None,
         ("Task Success", f"{perf.n_successes}/{n_runs}  ({_pct(perf.success_rate)})"),
         ("Mean Score", f"{perf.mean_score:.3f}"),
@@ -93,8 +105,7 @@ def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
         parts.append("  * cost incomplete: some models have no pricing entry (unpriced calls are excluded, "
                      "not counted as $0; re-price with `swarmeval report --pricing`)")
     if perf.trials > 1:
-        parts.append("  per-trial success: " + ", ".join(_pct(x) for x in perf.per_trial)
-                     + ("  (incomplete trial excluded)" if len(perf.per_trial) < perf.trials else ""))
+        parts.append("  per-trial success: " + _per_trial(perf))
 
     if show_agents and eff.per_agent:
         parts.append("")
