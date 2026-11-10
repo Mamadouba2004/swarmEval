@@ -222,7 +222,9 @@ def analyze_runs(runs: RunSet, pricing: Optional[PricingTable] = None, coordinat
     """Recompute the evaluation from trajectories (e.g. a saved RunSet).
     With ``pricing``, every LLM call is re-priced from its recorded model and
     token counts instead of using the cost stored at run time.
-    ``coordination=False`` skips the execution-graph analysis."""
+    ``coordination=False`` skips the execution-graph analysis.  A run whose
+    analysis fails is left out of the coordination summary with a warning;
+    when two or more runs all fail with the same exception type, it is raised."""
     per_run = [compute_efficiency(t, pricing) for t in runs.trajectories]
     performance = compute_performance(runs.trajectories, per_run)
     efficiency = summarize_efficiency(runs.trajectories, per_run)
@@ -230,6 +232,7 @@ def analyze_runs(runs: RunSet, pricing: Optional[PricingTable] = None, coordinat
     coord_summary: Optional[CoordinationSummary] = None
     errors: Dict[str, str] = {}
     first_exc: Optional[Exception] = None
+    kinds: set[type] = set()
     if coordination:
         similarity = resolve_similarity(similarity)   # once, not per run
         per_run_coord = []
@@ -241,11 +244,12 @@ def analyze_runs(runs: RunSet, pricing: Optional[PricingTable] = None, coordinat
                 cm = None
                 errors[t.run_id] = f"{type(exc).__name__}: {exc}"
                 first_exc = first_exc or exc
+                kinds.add(type(exc))
             per_run_coord.append(cm)
         done = [cm for cm in per_run_coord if cm is not None]
         if first_exc is not None:
-            if not done:  # e.g. a missing optional dependency, not an odd trace
-                raise first_exc
+            if not done and len(per_run_coord) > 1 and len(kinds) == 1:
+                raise first_exc  # every run, one cause: e.g. a missing optional dependency, not an odd trace
             warnings.warn(f"coordination analysis failed on {len(per_run_coord) - len(done)}/{len(per_run_coord)} "
                           f"runs: {type(first_exc).__name__}: {first_exc}", stacklevel=2)
         coord_summary = summarize_coordination(done) if done else None
