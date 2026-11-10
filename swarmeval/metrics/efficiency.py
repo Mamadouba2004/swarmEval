@@ -88,7 +88,7 @@ class EfficiencyMetrics:
 def event_cost(ev, pricing: Optional[PricingTable]) -> Optional[float]:
     """Cost of an LLM_CALL event: re-priced from its model and tokens when a
     pricing table is given, else the cost recorded at run time."""
-    if pricing is None:
+    if pricing is None or ev.metadata.get("cost_unknown"):
         return ev.cost_usd
     return pricing.cost(ev.model, ev.input_tokens, ev.output_tokens, ev.cache_read_tokens, ev.cache_write_tokens)
 

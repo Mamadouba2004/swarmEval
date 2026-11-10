@@ -11,6 +11,8 @@ import pytest
 from swarmeval import Benchmark, EvaluationResult, RunContext, SimClock, Task, evaluate, evaluators as E
 from swarmeval.cli import main
 from swarmeval.integrations.anthropic import instrument_client
+from swarmeval.metrics.efficiency import compute_efficiency
+from swarmeval.pricing import PricingTable
 from swarmeval.report.text import box
 
 
@@ -81,6 +83,23 @@ def test_streamed_call_is_passed_through_unrecorded(is_async):
         out = asyncio.run(out) if is_async else out
     assert out is stream
     assert ctx.finish().llm_calls() == []
+
+
+@pytest.mark.parametrize("is_async", [False, True])
+def test_stream_inside_llm_call_marks_its_cost_unknown(is_async):
+    """PR #8 review: a stream inside ``span.llm_call`` must not leave that
+    call priced at $0.00 as if complete; its cost is unknown."""
+    stream, client = streaming_client(is_async)
+    ctx = started_ctx()
+    with ctx.agent("a") as span:
+        with span.llm_call(model="claude-sonnet-5"):
+            out = client.messages.create(model="claude-sonnet-5", messages=[], stream=True)
+            out = asyncio.run(out) if is_async else out
+    assert out is stream
+    traj = ctx.finish()
+    (call,) = traj.llm_calls()
+    assert call.cost_usd is None and not traj.cost_is_complete
+    assert not compute_efficiency(traj, PricingTable()).cost_complete  # re-pricing keeps it unknown
 
 
 # -- audit 3: a crashing evaluator is visible --------------------------------- #

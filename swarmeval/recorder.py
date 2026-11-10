@@ -625,7 +625,7 @@ class AgentSpan:
         cr, cw = int(call.cache_read_tokens), int(call.cache_write_tokens)
         return ctx.record(EventType.LLM_CALL, _span=self, model=call.model, input_tokens=tin, output_tokens=tout,
                           cache_read_tokens=cr, cache_write_tokens=cw,
-                          cost_usd=ctx.cost_of(call.model, tin, tout, cr, cw),
+                          cost_usd=None if meta.get("cost_unknown") else ctx.cost_of(call.model, tin, tout, cr, cw),
                           latency_ms=(end - t0) * 1000.0, status=status, error=error,
                           content=ctx._text(call.output) if call.output is not None else None,
                           content_tokens=estimate_tokens(call.output) if call.output is not None else 0,
