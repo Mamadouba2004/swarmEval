@@ -573,13 +573,17 @@ def render_html(result: Any, path: Optional[str] = None, run_index: int = 0) -> 
         "health dimensions are reported separately; there is no overall score</div>",
     ]
     body += _phase1(result)
-    cs = result.coordination
+    cs, errors = result.coordination, result.coordination_errors
+    failed = (f'<p class="note warn">⚠ coordination analysis failed on {len(errors)}/{n_runs} runs: '
+              f"{_e(next(iter(errors.values())))}</p>") if errors else ""
     if cs is None:
-        body.append('<h2>Coordination</h2><p class="note">Coordination analysis was skipped for this report '
-                    "(run without <code>--no-coordination</code> to see the agent graph, critical path, observed "
-                    "contribution and diagnostics).</p>")
+        body.append("<h2>Coordination</h2>" + (failed or '<p class="note">Coordination analysis was skipped for '
+                    "this report (run without <code>--no-coordination</code> to see the agent graph, critical "
+                    "path, observed contribution and diagnostics).</p>"))
     else:
         body += _coordination_tiles(cs)
+        if failed:
+            body.append(failed)
     if n_runs:
         body += _run_views(result, run_index)
     if cs is not None:

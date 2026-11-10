@@ -2,6 +2,7 @@
 import html as htmllib
 import json
 import re
+import sys
 
 import pytest
 
@@ -238,3 +239,38 @@ def test_open_span_tooltip_matches_drawn_bar():
     span.end = None  # e.g. the process died before the span closed; the bar runs to the end of the run
     doc = render_html(res)
     assert re.search(r"<title>crashed span 3\.00s \(no end\)", doc), re.findall(r"<title>crashed span[^<]*", doc)
+
+
+def test_failed_coordination_is_reported_not_called_skipped(monkeypatch):
+    ev = sys.modules["swarmeval.evaluate"]   # the package attribute is the evaluate() function
+    real, calls = ev.compute_coordination, []
+
+    def flaky(traj, **kw):
+        calls.append(traj.run_id)
+        if len(calls) % 2 == 0:
+            raise KeyError(HOSTILE)
+        return real(traj, **kw)
+
+    monkeypatch.setattr(ev, "compute_coordination", flaky)
+    with pytest.warns(UserWarning, match="failed on 1/2 runs"):
+        res = analyze_runs(load_runset(FIXTURE))
+    doc = render_html(res)
+    assert "coordination analysis failed on 1/2 runs: KeyError: " in visible_text(doc)
+    assert "was skipped" not in doc and HOSTILE not in doc
+    # no summary but recorded errors (every run failing raises in analyze_runs; a
+    # result built by hand can still look like this): the note, not "skipped"
+    res.coordination = None
+    doc = render_html(res)
+    assert "coordination analysis failed on 1/2 runs: KeyError: " in visible_text(doc)
+    assert "was skipped" not in doc and HOSTILE not in doc
+
+
+def test_every_run_failing_coordination_raises(monkeypatch):
+    ev = sys.modules["swarmeval.evaluate"]
+
+    def broken(traj, **kw):
+        raise KeyError(HOSTILE)
+
+    monkeypatch.setattr(ev, "compute_coordination", broken)
+    with pytest.raises(KeyError):
+        analyze_runs(load_runset(FIXTURE))
