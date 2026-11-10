@@ -297,6 +297,22 @@ def test_late_information_and_premature_synthesis():
     assert not of(cm, "late_information")
 
 
+@pytest.mark.parametrize("kind", ["result", "information"])
+def test_peeked_message_followed_by_work_is_not_late_information(kind):
+    # b reads a's message with inbox() (records nothing) and then works again: the message was not too late.
+    # The receiver-did-nothing-after case still fires in test_late_information_and_premature_synthesis.
+    ctx = make_ctx()
+    with ctx.agent("b") as b:
+        llm(b)
+    with ctx.agent("a") as a:
+        llm(a)
+        a.send("b", "use source X, not Y", kind=kind)
+    with ctx.agent("b") as b:
+        assert b.inbox()
+        llm(b)
+    assert not of(compute_coordination(ctx.finish()), "late_information")
+
+
 def asked_then_answered(produce_first, reply_to):
     """writer asks reviewer something, before or after producing the final draft; the answer comes last."""
     ctx = make_ctx()
