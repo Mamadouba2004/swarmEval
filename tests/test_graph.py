@@ -169,6 +169,19 @@ def test_schema_v2_message_without_receive_is_not_inferred_as_delivered():
     assert compute_contribution(traj, g)["a"].status == "unused"
 
 
+def test_receive_stamped_before_its_send_still_counts_as_received():
+    """With threads and a wall clock a receive can be stamped before its send:
+    the DAG edge is dropped, but the message did arrive."""
+    traj = _send_receive()
+    (rcv,) = traj.events_of(EventType.MESSAGE_RECEIVE)
+    rcv.timestamp = traj.events_of(EventType.MESSAGE)[0].timestamp - 0.001
+    g = build_graph(traj)
+    assert not g.edges_of("message") and g.dropped_edges == 1
+    (link,) = g.messages
+    assert link.received and g.unit(link.receive_node).kind == "receive"
+    assert g.coverage.message_receive_coverage == 1.0
+
+
 def test_forwarding_an_artifact_is_not_consuming_it():
     ctx = make_ctx()
     clock = ctx.clock
