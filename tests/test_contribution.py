@@ -102,6 +102,26 @@ def test_complete_instrumentation_and_no_use_is_dead():
     assert a.provenance_coverage == 1.0 and a.dead is True and cm.dead_agents == ["a"]
 
 
+def _self_send(self_send):
+    """c produces notes (optionally mailing them to itself); w, active
+    afterwards, records no inputs, so it could have used them unseen."""
+    ctx = make_ctx()
+    clock = ctx.clock
+    with ctx.agent("c") as c:
+        art = c.produce("notes", "facts", derived_from=[])
+        if self_send:
+            c.send("c", "reminder", artifacts=[art])
+    with ctx.agent("w") as w:
+        llm(w, clock, 1.0)
+    return compute_coordination(ctx.finish()).contribution["c"]
+
+
+def test_message_to_self_does_not_make_provenance_complete():
+    plain, mailed = _self_send(False), _self_send(True)
+    assert (plain.provenance_coverage, plain.dead) == (0.0, None)
+    assert (mailed.provenance_coverage, mailed.dead) == (plain.provenance_coverage, plain.dead)
+
+
 def test_empty_derived_from_does_not_make_an_agent_instrumented():
     """b reads a's message in an LLM call that lists no inputs; its only
     provenance record is an artifact made "from nothing".  That says nothing
