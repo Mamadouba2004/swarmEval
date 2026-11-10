@@ -203,6 +203,34 @@ def test_late_information_and_premature_synthesis():
     assert not of(cm, "late_information")
 
 
+def asked_then_answered(produce_first, reply_to):
+    """writer asks reviewer something, before or after producing the final draft; the answer comes last."""
+    ctx = make_ctx()
+    with ctx.agent("writer") as w:
+        if produce_first:
+            llm(w)
+            final = w.produce("draft", "the draft", derived_from=[])
+        req = w.send("reviewer", "please check this", kind="request")
+        if not produce_first:
+            llm(w)
+            final = w.produce("draft", "the draft", derived_from=[])
+    with ctx.agent("reviewer") as r:
+        r.receive()
+        llm(r)
+        r.send("writer", "approved, no changes", kind="feedback", reply_to=req if reply_to else None)
+    with ctx.agent("writer") as w:
+        w.receive()
+    ctx.set_output("the draft", artifacts=[final])
+    return compute_coordination(ctx.finish())
+
+
+@pytest.mark.parametrize("reply_to", [True, False])
+def test_answer_to_a_request_sent_after_producing_is_not_premature_synthesis(reply_to):
+    assert not of(asked_then_answered(True, reply_to), "premature_synthesis")      # e.g. a review approval
+    pre = of(asked_then_answered(False, reply_to), "premature_synthesis")         # produced without waiting
+    assert len(pre) == 1 and pre[0].severity == "high"
+
+
 def test_communication_overhead():
     ctx = make_ctx()
     with ctx.agent("a") as a:

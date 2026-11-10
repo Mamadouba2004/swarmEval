@@ -401,6 +401,20 @@ def _late_and_premature(c: _Ctx) -> None:
             produced[a.producer].append(a.produced_at)
     finals = {c.traj.artifacts[a].producer for a in c.traj.output_artifacts if a in c.traj.artifacts}
     phase1 = g.schema_version is None
+    # message event id -> when the receiver sent the request this message answers
+    asked_at: Dict[str, float] = {}
+    sent: Dict[str, Any] = {}
+    asks: Dict[Tuple[str, str], float] = {}     # (asker, asked) -> latest request
+    for ev, is_reply in reply_flags(c.traj):
+        q = sent.get(ev.reply_to) if ev.reply_to else None
+        if q is not None and q.sender == ev.receiver:
+            asked_at[ev.event_id] = q.timestamp
+        elif is_reply and not ev.reply_to and (ev.receiver, ev.sender) in asks:
+            asked_at[ev.event_id] = asks[(ev.receiver, ev.sender)]
+        if ev.message_id:
+            sent[ev.message_id] = ev
+        if ev.kind in REQUEST_KINDS and ev.sender and ev.receiver:
+            asks[(ev.sender, ev.receiver)] = ev.timestamp
     for m in g.messages:
         r = m.receiver
         if not r or r == m.sender or not (m.kind in _CONTENT_KINDS or m.artifacts):
@@ -422,6 +436,8 @@ def _late_and_premature(c: _Ctx) -> None:
         after = [t for t in produced.get(r, []) if t >= got_at - EPS]
         if not before or after:
             continue
+        if asked_at.get(m.send_node, float("-inf")) >= min(before) - EPS:
+            continue   # an answer the receiver asked for only after producing, e.g. a review of its output
         sev = "high" if r in finals else "medium"
         inferred = not m.received
         c.add("premature_synthesis", _cap(sev, "low") if inferred else sev, [r, m.sender or "-"],
