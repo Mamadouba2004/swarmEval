@@ -17,7 +17,7 @@ Quick start::
 from . import evaluators
 from .evaluate import AnalysisFailed, EfficiencySummary, EvaluationResult, analyze_runs, evaluate
 from .recorder import AgentSpan, LLMCall, LLMResult, Message, RunContext, SimClock, ToolCall, WallClock
-from .runner import FunctionSwarm, RunOptions, RunSet, Swarm, SwarmRunner
+from .runner import FunctionSwarm, RunInterrupted, RunOptions, RunSet, Swarm, SwarmRunner
 from .schema import Artifact, Benchmark, Evaluation, Event, EventType, Span, Task, Trajectory
 from .metrics import (CommunicationMetrics, ContextMetrics, CoordinationMetrics, CoordinationSummary,
                       DependencyMetrics, EfficiencyMetrics, PerformanceMetrics, RedundancyMetrics,
@@ -37,7 +37,7 @@ __all__ = [
     "evaluate", "analyze_runs", "EvaluationResult", "AnalysisFailed", "EfficiencySummary",
     "Task", "Benchmark", "Trajectory", "Event", "EventType", "Span", "Artifact", "Evaluation",
     "RunContext", "AgentSpan", "Message", "LLMResult", "LLMCall", "ToolCall", "SimClock", "WallClock",
-    "Swarm", "FunctionSwarm", "SwarmRunner", "RunOptions", "RunSet",
+    "Swarm", "FunctionSwarm", "SwarmRunner", "RunInterrupted", "RunOptions", "RunSet",
     "PerformanceMetrics", "EfficiencyMetrics", "compute_performance", "compute_efficiency",
     "CoordinationMetrics", "CoordinationSummary", "compute_coordination", "summarize_coordination",
     "CommunicationMetrics", "compute_communication", "RedundancyMetrics", "compute_redundancy",

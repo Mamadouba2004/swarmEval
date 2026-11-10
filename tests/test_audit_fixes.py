@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from swarmeval import (Benchmark, EvaluationResult, RunContext, SimClock, Task, compare, evaluate, evaluators as E,
-                       render_html)
+from swarmeval import (Benchmark, EvaluationResult, RunContext, RunInterrupted, SimClock, Task, compare, evaluate,
+                       evaluators as E, render_html)
 from swarmeval.cli import main
 from swarmeval.evaluate import analyze_runs
 from swarmeval.integrations.anthropic import instrument_client
@@ -32,17 +32,36 @@ def no_escape(fn, *args, **kwargs):
 
 
 # -- audit 1: an interrupt keeps the finished runs ---------------------------- #
-def test_interrupt_returns_runs_finished_before_it():
-    def swarm(task, ctx):
-        with ctx.agent("solo"):
-            if task.task_id == "t3":
-                raise KeyboardInterrupt  # through an open span, as in a real Ctrl-C
-        return "42"
+def interrupt_at_t3(task, ctx):
+    with ctx.agent("solo"):
+        if task.task_id == "t3":
+            raise KeyboardInterrupt  # through an open span, as in a real Ctrl-C
+    return "42"
 
-    res = no_escape(evaluate, swarm, five_tasks(), clock_factory=SimClock)
+
+def test_interrupt_returns_runs_finished_before_it():
+    with pytest.raises(RunInterrupted) as ei:
+        evaluate(interrupt_at_t3, five_tasks(), clock_factory=SimClock)
+    assert isinstance(ei.value, KeyboardInterrupt)
+    res = ei.value.result
     assert [t.task_id for t in res.runs.trajectories] == ["t1", "t2"]
     assert res.runs.metadata["interrupted"] is True
     assert "interrupted after 2/5 runs" in res.report()
+
+
+def test_interrupt_stops_the_script_before_the_next_evaluation():
+    """PR #8 review round 2: run() swallowed Ctrl-C, so in
+    ``evaluate(a, b); evaluate(c, b)`` the second (paid) evaluation still ran."""
+    reached = []
+
+    def script():
+        evaluate(interrupt_at_t3, five_tasks(), clock_factory=SimClock)
+        reached.append("second evaluation")
+        evaluate(lambda t, c: "42", five_tasks(), clock_factory=SimClock)
+
+    with pytest.raises(RunInterrupted):
+        script()
+    assert reached == []
 
 
 def test_cli_run_saves_partial_results_on_interrupt(tmp_path, monkeypatch):
@@ -50,9 +69,29 @@ def test_cli_run_saves_partial_results_on_interrupt(tmp_path, monkeypatch):
         "def run(task, ctx):\n    if task.task_id == 't3':\n        raise KeyboardInterrupt\n    return '42'\n")
     monkeypatch.syspath_prepend(str(tmp_path))
     five_tasks().save(str(tmp_path / "bench.json"))
-    no_escape(main, ["run", "--swarm", "intswarm:run", "--benchmark", str(tmp_path / "bench.json"),
-                     "--out", str(tmp_path / "out")])
+    assert no_escape(main, ["run", "--swarm", "intswarm:run", "--benchmark", str(tmp_path / "bench.json"),
+                            "--out", str(tmp_path / "out")]) == 130
     saved = EvaluationResult.load(str(tmp_path / "out" / "baseline.json"))
+    assert len(saved.runs.trajectories) == 2 and saved.runs.metadata["interrupted"] is True
+
+
+def interrupt_demo_at_third_run(monkeypatch):
+    from swarmeval.examples import research_swarm
+    real, made = research_swarm.make_swarm, []
+
+    def make_swarm():
+        made.append(1)
+        if len(made) == 3:
+            raise KeyboardInterrupt
+        return real()
+
+    monkeypatch.setattr(research_swarm, "make_swarm", make_swarm)
+
+
+def test_cli_demo_returns_130_and_writes_outputs_on_interrupt(tmp_path, monkeypatch):
+    interrupt_demo_at_third_run(monkeypatch)
+    assert no_escape(main, ["demo", "--trials", "1", "--out", str(tmp_path)]) == 130
+    saved = EvaluationResult.load(str(tmp_path / "baseline.json"))
     assert len(saved.runs.trajectories) == 2 and saved.runs.metadata["interrupted"] is True
 
 
@@ -66,7 +105,9 @@ def interrupted_in_second_trial():
             raise KeyboardInterrupt
         return "42" if len(calls) <= 5 else "no"
 
-    return no_escape(evaluate, swarm, five_tasks(), trials=2, clock_factory=SimClock)
+    with pytest.raises(RunInterrupted) as ei:
+        evaluate(swarm, five_tasks(), trials=2, clock_factory=SimClock)
+    return ei.value.result
 
 
 def test_interrupted_header_and_per_trial_success_are_honest():

@@ -120,6 +120,8 @@ Return an `LLMResult(text, input_tokens, output_tokens, model)` from the functio
 
 `evaluate()` also accepts a `Swarm` class, a bare `run(task, ctx)` function (sync or `async`) or a zero-argument factory. Use `clock_factory=SimClock` for simulated swarms that advance a virtual clock. An `evaluator=` passed to `evaluate()` overrides the task and benchmark evaluators. `capture_text=False` keeps only short previews of prompts, outputs, tool arguments and artifacts in everything recorded and saved.
 
+Ctrl-C during `evaluate()` raises `RunInterrupted` (a `KeyboardInterrupt`, exported from `swarmeval`), so a script stops rather than going on to its next evaluation; its `.result` is the evaluation of the runs finished before the interrupt (`runs.metadata["interrupted"]` is set and the report says so). `swarmeval run` and `swarmeval demo` print and save that partial result and exit with code 130.
+
 ---
 
 ## Task format

@@ -13,7 +13,7 @@ from .metrics.efficiency import EfficiencyMetrics, compute_efficiency
 from .metrics.performance import PerformanceMetrics, compute_performance
 from .pricing import PricingTable
 from .recorder import Clock
-from .runner import RunOptions, RunSet, SwarmRunner
+from .runner import RunInterrupted, RunOptions, RunSet, SwarmRunner
 from .schema import Benchmark, Trajectory
 from .diagnostics.smells import resolve_smell_config
 from .similarity import resolve_similarity
@@ -294,17 +294,27 @@ def evaluate(swarm: Any, benchmark: Benchmark, trials: int = 1, seed: int = 0, e
     keeps only short previews of prompts, outputs and artifacts.
     ``coordination``, ``similarity`` and ``smell_config`` are passed to
     ``analyze_runs``; the similarity backend is resolved before any run, so a
-    missing optional dependency fails fast.  If the analysis fails after the
-    runs, ``AnalysisFailed`` carries them and the plain evaluation.
+    missing optional dependency fails fast.  Ctrl-C raises ``RunInterrupted``
+    (a ``KeyboardInterrupt``) whose ``result`` is the evaluation of the runs
+    finished before it.  If the analysis fails after the runs,
+    ``AnalysisFailed`` carries them and the plain evaluation.
     """
     opts = RunOptions(trials=trials, seed=seed, clock_factory=clock_factory, pricing=pricing, evaluator=evaluator,
                       progress=progress, raise_errors=raise_errors, on_run=on_run, capture_text=capture_text,
                       max_text_chars=max_text_chars)
     if coordination:
         similarity = resolve_similarity(similarity)   # a missing backend fails here, before any (paid) run
-    runs = SwarmRunner(swarm, benchmark, label=label, options=opts).run()
+    analysis = dict(coordination=coordination, similarity=similarity, smell_config=smell_config)
     try:
-        return analyze_runs(runs, coordination=coordination, similarity=similarity, smell_config=smell_config)
+        runs = SwarmRunner(swarm, benchmark, label=label, options=opts).run()
+    except RunInterrupted as exc:  # Ctrl-C: attach the finished runs' analysis and keep stopping
+        try:
+            exc.result = analyze_runs(exc.runs, **analysis)
+        except Exception:  # an analysis failure must not hide the interrupt
+            exc.result = analyze_runs(exc.runs, coordination=False)
+        raise
+    try:
+        return analyze_runs(runs, **analysis)
     except Exception as exc:  # the runs are done (and paid for): hand them back with the plain evaluation
         plain = analyze_runs(runs, coordination=False)
         plain.coordination_errors = failure_errors(exc, runs)

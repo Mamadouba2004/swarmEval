@@ -26,6 +26,7 @@ from .export.jsonl import write_events_jsonl
 from .graph.builder import build_graph
 from .graph.export import GRAPH_FORMATS, VIEWS, export_graph
 from .metrics.coordination import compute_coordination
+from .runner import RunInterrupted
 from .pricing import PricingTable
 from .recorder import SimClock
 from .report.html import render_html
@@ -112,49 +113,46 @@ def _write_html(result: EvaluationResult, args: argparse.Namespace) -> None:
     print(f"\nwrote HTML report to {args.html}")
 
 
-def _write_plain_evaluation(exc: AnalysisFailed, out: Optional[str]) -> int:
-    print(exc.result.report())
-    _write_outputs(exc.result, out)
-    cause = exc.__cause__
-    done = f"written to {out}" if out else "shown"
-    print(f"swarmeval: coordination analysis failed: {type(cause).__name__}: {cause}; plain evaluation {done}",
-          file=sys.stderr)
-    return 1
+def _evaluate(*args: Any, out: Optional[str] = None, **kwargs: Any) -> Any:
+    """``evaluate()`` and an exit code: Ctrl-C gives the finished runs' result
+    and 130; a failed coordination analysis gives the plain evaluation and 1."""
+    try:
+        return evaluate(*args, **kwargs), 0
+    except RunInterrupted as exc:
+        return exc.result, 130
+    except AnalysisFailed as exc:
+        cause = exc.__cause__
+        done = f"written to {out}" if out else "shown"
+        print(f"swarmeval: coordination analysis failed: {type(cause).__name__}: {cause}; plain evaluation {done}",
+              file=sys.stderr)
+        return exc.result, 1
 
 
 def cmd_demo(args: argparse.Namespace) -> int:
     from .examples.research_swarm import build_benchmark, make_swarm
     bench = build_benchmark()
     _check_html_run(args, len(bench) * args.trials)
-    try:
-        result = evaluate(make_swarm, bench, trials=args.trials, clock_factory=SimClock, progress=True,
-                          **_analysis_kwargs(args))
-    except AnalysisFailed as exc:
-        code = _write_plain_evaluation(exc, args.out)
-        _write_html(exc.result, args)
-        return code
+    result, code = _evaluate(make_swarm, bench, out=args.out, trials=args.trials, clock_factory=SimClock,
+                             progress=True, **_analysis_kwargs(args))
     print(result.report())
     if args.trace:
         print()
         print(render_trajectory(result.runs.trajectories[0]))
     _write_outputs(result, args.out)
     _write_html(result, args)
-    return 0
+    return code
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     swarm = _load_obj(args.swarm)
     bench = _load_benchmark(args.benchmark)
     pricing = PricingTable.load(args.pricing) if args.pricing else None
-    try:
-        result = evaluate(swarm, bench, trials=args.trials, seed=args.seed, clock_factory=_clock_factory(args.clock),
-                          label=args.label, progress=True, pricing=pricing, capture_text=not args.no_capture_text,
-                          **_analysis_kwargs(args))
-    except AnalysisFailed as exc:
-        return _write_plain_evaluation(exc, args.out)
+    result, code = _evaluate(swarm, bench, out=args.out, trials=args.trials, seed=args.seed,
+                             clock_factory=_clock_factory(args.clock), label=args.label, progress=True,
+                             pricing=pricing, capture_text=not args.no_capture_text, **_analysis_kwargs(args))
     print(result.report())
     _write_outputs(result, args.out)
-    return 0
+    return code
 
 
 def _load_runs_or_exit(path: str):

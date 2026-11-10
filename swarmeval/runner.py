@@ -158,6 +158,16 @@ class RunSet:
             return cls.from_dict(json.load(f))
 
 
+class RunInterrupted(KeyboardInterrupt):
+    """Ctrl-C during ``SwarmRunner.run``.  ``runs`` is the partial RunSet (the
+    interrupted run is dropped); ``evaluate()`` sets ``result`` to its analysis."""
+
+    def __init__(self, runs: RunSet) -> None:
+        super().__init__(f"interrupted after {len(runs)} runs")
+        self.runs = runs
+        self.result: Any = None
+
+
 class SwarmRunner:
     def __init__(self, swarm: Any, benchmark: Benchmark, label: str = "baseline",
                  options: Optional[RunOptions] = None, **kwargs: Any) -> None:
@@ -237,6 +247,7 @@ class SwarmRunner:
         rs = RunSet(self.label, self.benchmark.name)
         total = len(self.benchmark.tasks) * self.options.trials
         done = 0
+        interrupted = False
         try:
             for trial in range(self.options.trials):
                 for task in self.benchmark.tasks:
@@ -246,8 +257,11 @@ class SwarmRunner:
                         sys.stderr.write(f"\r[{self.label}] {done}/{total} runs")
                         sys.stderr.flush()
         except KeyboardInterrupt:  # keep the finished runs; the interrupted one is dropped
+            interrupted = True
             rs.metadata["interrupted"] = True
             rs.metadata["planned_runs"] = total
         if self.options.progress:
             sys.stderr.write("\n")
+        if interrupted:  # re-raised so a script stops instead of starting its next (paid) evaluation
+            raise RunInterrupted(rs)
         return rs
