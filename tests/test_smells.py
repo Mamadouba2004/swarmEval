@@ -96,14 +96,15 @@ def test_review_rounds_show_ping_pong_without_a_cycle():
 # individual smells
 # --------------------------------------------------------------------------- #
 def exchange_traj(n_messages):
-    """a and b take turns: n messages, n - 1 changes of direction."""
+    """a and b take turns, each answering the last message: n messages, n - 1 changes of direction."""
     ctx = make_ctx()
+    last = None
     for i in range(n_messages):
         src, dst = ("a", "b") if i % 2 == 0 else ("b", "a")
         with ctx.agent(src) as s:
             s.receive()
             llm(s)
-            s.send(dst, f"round {i}", kind="feedback")
+            last = s.send(dst, f"round {i}", kind="feedback", reply_to=last)
     with ctx.agent("b" if n_messages % 2 else "a") as s:
         s.receive()
     return ctx.finish()
@@ -132,6 +133,72 @@ def test_sequential_delegation_is_not_ping_pong():
             llm(w)
             w.send("boss", f"done {i}", kind="result")
     assert not of(compute_coordination(ctx.finish()), "agent_ping_pong")
+
+
+@pytest.mark.parametrize("reply_to", [False, True])
+def test_delegated_tasks_with_default_kinds_are_not_ping_pong(reply_to):
+    ctx = make_ctx()
+    for i in range(3):                    # three unrelated tasks, each answered once
+        with ctx.agent("coordinator") as b:
+            b.receive()
+            task = b.send("worker", f"task {i}")
+        with ctx.agent("worker") as w:
+            w.receive()
+            llm(w)
+            w.send("coordinator", f"done {i}", reply_to=task if reply_to else None)
+    assert not of(compute_coordination(ctx.finish()), "agent_ping_pong")
+
+
+def test_same_artifact_attached_to_unrelated_tasks_is_not_ping_pong():
+    ctx = make_ctx()
+    with ctx.agent("coordinator") as b:
+        guide = b.produce("style_guide", "write plainly", derived_from=[])
+    for i in range(3):
+        with ctx.agent("coordinator") as b:
+            b.receive()
+            b.send("worker", f"task {i}", artifacts=[guide])   # the same artifact again is not a revision
+        with ctx.agent("worker") as w:
+            w.receive()
+            llm(w)
+            w.send("coordinator", f"done {i}")
+    assert not of(compute_coordination(ctx.finish()), "agent_ping_pong")
+
+
+@pytest.mark.parametrize("revision", ["same_name", "derived_from"])
+def test_review_loop_of_redrafts_sent_as_requests_is_ping_pong(revision):
+    ctx = make_ctx()
+    draft = None
+    for i in range(6):                    # six rounds: draft, critique, revised draft, ...
+        with ctx.agent("writer") as w:
+            w.receive()
+            llm(w)
+            if revision == "same_name":
+                draft = w.produce("draft", f"draft {i}", derived_from=[])
+            else:
+                draft = w.produce(f"draft_v{i}", f"draft {i}", derived_from=[draft] if draft else [])
+            w.send("critic", f"please review draft {i}", kind="request", artifacts=[draft])
+        with ctx.agent("critic") as c:
+            c.receive()
+            llm(c)
+            c.send("writer", f"critique {i}", kind="feedback")
+    pp = of(compute_coordination(ctx.finish()), "agent_ping_pong")
+    assert len(pp) == 1 and pp[0].agents == ["writer", "critic"] and pp[0].evidence["alternations"] == 11
+
+
+def test_review_loop_chained_by_reply_to_with_default_kinds_is_ping_pong():
+    ctx = make_ctx()
+    last = None
+    for i in range(6):
+        with ctx.agent("writer") as w:
+            w.receive()
+            llm(w)
+            ask = w.send("critic", f"draft {i}", reply_to=last)
+        with ctx.agent("critic") as c:
+            c.receive()
+            llm(c)
+            last = c.send("writer", f"critique {i}", reply_to=ask)
+    pp = of(compute_coordination(ctx.finish()), "agent_ping_pong")
+    assert len(pp) == 1 and pp[0].evidence["alternations"] == 11
 
 
 def test_redundant_delegation_from_several_senders():

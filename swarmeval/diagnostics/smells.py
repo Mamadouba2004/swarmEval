@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from ..graph.builder import EPS
-from ..metrics.dependency import REQUEST_KINDS, reply_flags
+from ..metrics.dependency import REQUEST_KINDS
 from ..metrics.redundancy import VERIFICATION_ROLES, is_verification, tool_key
 from ..schema import MessageKind, Trajectory, to_text
 from ..similarity import LexicalSimilarity
@@ -250,23 +250,45 @@ def _redundant_delegation(c: _Ctx) -> None:
 
 
 def _ping_pong(c: _Ctx) -> None:
-    """Counts changes of direction in the longest back-and-forth of a pair.  A
-    new request (one that answers nothing) starts a fresh exchange, so a run of
-    delegated tasks, each answered once, is a series of round trips."""
-    cfg = c.cfg
+    """Counts changes of direction in the longest back-and-forth of a pair,
+    whatever the message kinds.  The first message of an exchange makes its
+    sender the opener; the other side's replies always continue it.  The
+    opener turning back continues it only with evidence that it is answering:
+    a ``reply_to`` naming a message of the exchange, or a revision of an
+    artifact carried in it (same name with a new id, or ``derived_from`` it).
+    Otherwise it starts a new exchange, so a run of delegated tasks, each
+    answered once, is a series of round trips.  A loop in plain text with no
+    ``reply_to`` and no artifacts therefore does not fire."""
+    cfg, arts = c.cfg, c.traj.artifacts
     pairs: Dict[Tuple[str, str], List[str]] = defaultdict(list)
     longest: Dict[Tuple[str, str], int] = defaultdict(int)
-    run: Dict[Tuple[str, str], int] = defaultdict(int)
-    for m, is_reply in reply_flags(c.traj):
-        if m.sender and m.receiver and m.sender != m.receiver:
-            a, b = c.order((m.sender, m.receiver))
-            senders = pairs[(a, b)]
-            if m.kind in REQUEST_KINDS and not is_reply:
-                run[(a, b)] = 0
-            elif senders and senders[-1] != m.sender:
-                run[(a, b)] += 1
-                longest[(a, b)] = max(longest[(a, b)], run[(a, b)])
-            senders.append(m.sender)
+    ex: Dict[Tuple[str, str], Dict[str, Any]] = {}      # pair -> the current exchange
+
+    def revises(aid: str, carried: Set[str]) -> bool:
+        a = arts.get(aid)
+        if a is None or aid in carried:
+            return False                                 # the identical artifact again is no evidence
+        return (any(arts[x].name == a.name for x in carried if x in arts)
+                or any(x in carried for x in a.derived_from or []))
+
+    for m in sorted(c.traj.messages(), key=lambda e: e.timestamp):
+        if not (m.sender and m.receiver and m.sender != m.receiver):
+            continue
+        a, b = c.order((m.sender, m.receiver))
+        key = (a, b)
+        senders, cur = pairs[key], ex.get(key)
+        if cur is not None and senders[-1] != m.sender:
+            if m.sender != cur["opener"] or (m.reply_to and m.reply_to in cur["ids"]) or any(
+                    revises(x, cur["arts"]) for x in m.input_artifacts):
+                cur["run"] += 1
+                longest[key] = max(longest[key], cur["run"])
+            else:
+                cur = None
+        if cur is None:
+            cur = ex[key] = {"opener": m.sender, "run": 0, "ids": set(), "arts": set()}
+        cur["ids"].add(m.message_id)
+        cur["arts"].update(m.input_artifacts)
+        senders.append(m.sender)
     for (a, b), senders in pairs.items():
         alternations = longest[(a, b)]
         if alternations < cfg.pingpong_min_alternations:
