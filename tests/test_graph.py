@@ -182,6 +182,25 @@ def test_receive_stamped_before_its_send_still_counts_as_received():
     assert g.coverage.message_receive_coverage == 1.0
 
 
+def test_call_that_ended_before_the_send_does_not_use_a_backwards_stamped_message():
+    ctx = make_ctx()
+    clock = ctx.clock
+    with ctx.agent("a") as a:
+        art = a.produce("notes", "facts", derived_from=[])
+        clock.advance(5.0)
+        a.send("b", "notes", artifacts=[art])
+    with ctx.agent("b") as b:
+        b.receive()
+        llm(b, clock, 1.0)
+    traj = ctx.finish()
+    sent = traj.events_of(EventType.MESSAGE)[0].timestamp
+    (rcv,) = traj.events_of(EventType.MESSAGE_RECEIVE)
+    (call,) = traj.llm_calls()
+    rcv.timestamp, call.timestamp, call.latency_ms = sent - 0.02, sent - 0.015, 5.0   # all over before the send
+    (link,) = build_graph(traj).messages
+    assert link.received and not link.used
+
+
 def test_forwarding_an_artifact_is_not_consuming_it():
     ctx = make_ctx()
     clock = ctx.clock
