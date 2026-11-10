@@ -101,7 +101,7 @@ def _add_html_args(p: argparse.ArgumentParser) -> None:
 
 
 def _check_html_run(args: argparse.Namespace, n_runs: int) -> None:
-    """Reject a bad --run before any evaluation or output happens."""
+    """Reject a bad --run with a clean message (before evaluating where possible)."""
     if args.html and n_runs and not 0 <= (args.run or 0) < n_runs:   # no runs: render_html writes the summary
         raise SystemExit(f"swarmeval: --run {args.run or 0} out of range (result has {n_runs} runs)")
 
@@ -139,6 +139,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
         print()
         print(render_trajectory(result.runs.trajectories[0]))
     _write_outputs(result, args.out)
+    _check_html_run(args, len(result.runs))  # an interrupt can leave fewer runs than planned
     _write_html(result, args)
     return code
 

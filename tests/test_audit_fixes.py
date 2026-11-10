@@ -95,6 +95,17 @@ def test_cli_demo_returns_130_and_writes_outputs_on_interrupt(tmp_path, monkeypa
     assert len(saved.runs.trajectories) == 2 and saved.runs.metadata["interrupted"] is True
 
 
+def test_interrupted_demo_rejects_out_of_range_html_run_cleanly(tmp_path, monkeypatch):
+    """PR #8 review round 2: --run 5 passed the upfront check (8 planned runs),
+    but after an interrupt at 2 runs render_html raised a ValueError traceback."""
+    interrupt_demo_at_third_run(monkeypatch)
+    with pytest.raises(SystemExit) as ei:
+        no_escape(main, ["demo", "--trials", "1", "--out", str(tmp_path), "--html", str(tmp_path / "r.html"),
+                         "--run", "5"])
+    assert str(ei.value) == "swarmeval: --run 5 out of range (result has 2 runs)"
+    assert (tmp_path / "baseline.json").exists() and not (tmp_path / "r.html").exists()
+
+
 def interrupted_in_second_trial():
     """5 tasks x 2 trials, Ctrl-C at the 8th run: trial 2 is partial."""
     calls = []
