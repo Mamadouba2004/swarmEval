@@ -28,27 +28,29 @@ def search(ctx, span, query, fail=False):
 
 
 def test_canonical_args():
-    assert canonical_args({"query": "S1 "}) == canonical_args({"query": "S1"})
-    assert canonical_args({"q": "a b", "n": 3}) == canonical_args({"n": 3, "q": " a b"})
+    assert canonical_args({"q": "a b", "n": 3}) == canonical_args({"n": 3, "q": "a b"})    # key order ignored
     assert canonical_args({"query": "s1"}) != canonical_args({"query": "s2"})
     assert canonical_args({"n": 1}) != canonical_args({"n": "1"})          # numbers stay numbers
-    assert canonical_args({"x": [" A ", {"B": "C "}]}) == canonical_args({"x": ["A", {"B": "C"}]})
+    assert canonical_args({"x": ["A", {"B": "C"}]}) == canonical_args({"x": ["A", {"B": "C"}]})
     obj = object()
     assert canonical_args({"x": obj}) == repr({"x": obj})                   # unserializable -> repr
 
 
-def test_canonical_args_keeps_case_and_inner_whitespace():
-    """Paths, ids and code are case- and layout-sensitive: only the ends are trimmed."""
+def test_canonical_args_compares_strings_exactly():
+    """Paths, ids, queries and code are case- and layout-sensitive: strings are compared as given."""
     assert canonical_args({"path": "README.md"}) != canonical_args({"path": "readme.md"})
     assert canonical_args({"id": "AbC1"}) != canonical_args({"id": "abc1"})
     assert canonical_args({"code": "if x:\n    y()"}) != canonical_args({"code": "if x:\n  y()"})
-    assert canonical_args({"q": "  x  "}) == canonical_args({"q": "x"})
+    assert canonical_args({"code": "    x = 1"}) != canonical_args({"code": "x = 1"})
+    assert canonical_args({"text": "a\n"}) != canonical_args({"text": "a"})
+    assert canonical_args({"q": " S1 "}) != canonical_args({"q": "S1"})
     assert canonical_args({"a": 1, "b": "x"}) == canonical_args({"b": "x", "a": 1})
 
-def test_normalized_args_are_duplicates():
+
+def test_identical_args_are_duplicates():
     ctx = make_ctx()
     with ctx.agent("a") as a:
-        search(ctx, a, "S1 ")
+        search(ctx, a, "S1")
         search(ctx, a, "other")
     with ctx.agent("b") as b:
         search(ctx, b, "S1")

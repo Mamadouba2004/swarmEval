@@ -4,9 +4,9 @@ Two separate numbers, never merged:
 
 * **tool redundancy** = accidental duplicate tool calls ÷ tool calls.  Two
   calls duplicate each other when they have the same tool and the same
-  arguments after normalization (strings lowercased, whitespace collapsed;
-  dict keys sorted).  The first call (by start time) is the original; each
-  later one is classified as
+  arguments (strings compared exactly; dict keys and sets in any order).
+  The first call (by start time) is the original; each later one is
+  classified as
 
   - ``retry``: the same agent's previous call with that key failed;
   - ``verification``: made by a checking role (critic, verifier, reviewer,

@@ -93,9 +93,8 @@ def content_hash(obj: Any) -> str:
 
 
 def _normalize(obj: Any) -> Any:
-    if isinstance(obj, str):
-        return obj.strip()  # case and inner spacing matter in paths, ids and code
-    if isinstance(obj, (bool, int, float)) or obj is None:
+    if isinstance(obj, (str, bool, int, float)) or obj is None:
+        return obj  # strings as given: case and spacing matter in paths, ids and code
         return obj
     if isinstance(obj, dict):
         return {str(k): _normalize(v) for k, v in obj.items()}
@@ -107,8 +106,9 @@ def _normalize(obj: Any) -> Any:
 
 
 def canonical_args(args: Any) -> str:
-    """Stable text form of tool arguments: ``{"query": " S1 "}`` and
-    ``{"query": "S1"}`` give the same key; ``{"query": "s1"}`` does not."""
+    """Stable text form of tool arguments: key and set order are ignored,
+    strings are compared as given (``{"query": "S1"}`` and ``{"query": "s1"}``
+    or ``" S1"`` differ)."""
     norm = _normalize(args)
     try:
         return json.dumps(norm, sort_keys=True)
