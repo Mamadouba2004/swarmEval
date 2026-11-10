@@ -274,3 +274,15 @@ def test_every_run_failing_coordination_raises(monkeypatch):
     monkeypatch.setattr(ev, "compute_coordination", broken)
     with pytest.raises(KeyError):
         analyze_runs(load_runset(FIXTURE))
+
+
+def test_empty_runset_writes_a_summary_page(tmp_path):
+    from argparse import Namespace
+    from swarmeval.cli import _check_html_run
+    from swarmeval.runner import RunSet
+    _check_html_run(Namespace(html="r.html", run=None), 0)
+    empty = tmp_path / "empty.json"
+    RunSet("l", "b", []).save(str(empty))
+    out = tmp_path / "r.html"
+    assert main(["report", str(empty), "--html", str(out)]) == 0
+    assert "0 runs" in out.read_text(encoding="utf-8")
