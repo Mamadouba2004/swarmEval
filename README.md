@@ -13,7 +13,7 @@ Phase 3  Ablation · failure injection · counterfactuals · confidence interval
 Phase 4  Architecture recommendations · validated optimization
 ```
 
-Pure Python 3.9+, no runtime dependencies. Optional Anthropic SDK adapter. The design charter is in [docs/DESIGN.md](docs/DESIGN.md); the full research write-up is in [research.md](research.md).
+Python 3.12+, no runtime dependencies. Optional Anthropic SDK adapter. The design charter is in [docs/DESIGN.md](docs/DESIGN.md); the full research write-up is in [research.md](research.md).
 
 ---
 
@@ -208,4 +208,4 @@ docker run --rm -v "$PWD":/w -w /w python:3.12-slim \
   sh -c 'pip install -q -e ".[dev,parquet]" && pytest -q'
 ```
 
-Swap the image tag (e.g. `python:3.9-slim`) to check the oldest supported Python. The Parquet tests skip when `pyarrow` is not installed.
+The Parquet tests skip when `pyarrow` is not installed.
