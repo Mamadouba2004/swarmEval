@@ -72,7 +72,8 @@ class CommunicationMetrics:
     work_product / other to ``{"messages", "body_tokens"}``.
     ``repeated_messages`` counts extra copies of a (sender, receiver, content)
     already sent; ``broadcasts`` counts one content sent from one span to two
-    or more receivers (``broadcast_messages`` the messages involved).
+    or more receivers (``broadcast_messages`` the messages involved; messages
+    sent outside any span are never grouped).
     ``used_edge_ratio`` = messages the receiver used ÷ messages, of which
     ``used_inferred`` were judged used by timing alone."""
     messages: int = 0
@@ -135,7 +136,7 @@ def compute_communication(traj: Trajectory, graph: Optional[ExecutionGraph] = No
         cat["messages"] += 1
         cat["body_tokens"] += body
         repeats[(ev.sender, ev.receiver, ev.content_hash)] += 1
-        if ev.receiver is not None:
+        if ev.receiver is not None and ev.span_id is not None:   # no span, nothing ties sends together
             g = (ev.sender, ev.span_id, ev.content_hash)
             fanout_groups[g].add(ev.receiver)
             fanout_counts[g] += 1

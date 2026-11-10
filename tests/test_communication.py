@@ -84,6 +84,15 @@ def test_kind_split_repeats_and_broadcasts():
     assert cm.per_agent["lead"].fan_out == 3 and cm.per_agent["lead"].fan_in == 1
 
 
+def test_same_text_sent_outside_spans_is_not_one_broadcast():
+    ctx = make_ctx()
+    ctx.send("lead", "w1", "ping")
+    ctx.clock.advance(5.0)
+    ctx.send("lead", "w2", "ping")             # later, unrelated: no span ties the two together
+    cm = compute_communication(ctx.finish())
+    assert cm.broadcasts == 0 and cm.broadcast_messages == 0
+
+
 def test_star_topology_hub_share_and_relay():
     """Every message goes through the hub; the hub forwards a's artifact."""
     ctx = make_ctx()
