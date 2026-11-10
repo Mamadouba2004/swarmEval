@@ -96,7 +96,7 @@ def test_cli_demo_returns_130_and_writes_outputs_on_interrupt(tmp_path, monkeypa
     assert len(saved.runs.trajectories) == 2 and saved.runs.metadata["interrupted"] is True
 
 
-@pytest.mark.parametrize("finished, run", [(2, "5"), (0, "0")])
+@pytest.mark.parametrize("finished, run", [(2, "5"), (1, "1")])
 def test_interrupted_demo_skips_an_out_of_range_html_run_and_exits_130(tmp_path, monkeypatch, capsys,
                                                                         finished, run):
     """PR #8 review round 2: --run passed the upfront check (8 planned runs), but
@@ -108,6 +108,15 @@ def test_interrupted_demo_skips_an_out_of_range_html_run_and_exits_130(tmp_path,
     assert code == 130
     assert f"--run {run} out of range (result has {finished} runs); HTML report not written" in capsys.readouterr().err
     assert (tmp_path / "baseline.json").exists() and not (tmp_path / "r.html").exists()
+
+
+def test_demo_interrupted_before_the_first_run_writes_outputs_and_exits_130(tmp_path, monkeypatch):
+    """PR #8 review round 3: with 0 runs ``--trace`` raised IndexError before
+    the outputs were written, losing exit 130; the HTML page is summary-only."""
+    interrupt_demo_at_third_run(monkeypatch, at=1)
+    code = no_escape(main, ["demo", "--trace", "--out", str(tmp_path), "--html", str(tmp_path / "r.html")])
+    assert code == 130
+    assert (tmp_path / "baseline.json").exists() and (tmp_path / "r.html").exists()
 
 
 def interrupted_in_second_trial():

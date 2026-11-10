@@ -135,12 +135,13 @@ def cmd_demo(args: argparse.Namespace) -> int:
     result, code = _evaluate(make_swarm, bench, out=args.out, trials=args.trials, clock_factory=SimClock,
                              progress=True, **_analysis_kwargs(args))
     print(result.report())
-    if args.trace:
+    _write_outputs(result, args.out)
+    if args.trace and result.runs.trajectories:
         print()
         print(render_trajectory(result.runs.trajectories[0]))
-    _write_outputs(result, args.out)
-    if args.html and not 0 <= (args.run or 0) < len(result.runs):
+    if args.html and 0 < len(result.runs) <= (args.run or 0):
         # only an interrupt leaves fewer runs than the upfront check allowed; keep its exit code
+        # (with 0 runs the HTML is a summary-only page, so it is still written)
         print(f"swarmeval: --run {args.run or 0} out of range (result has {len(result.runs)} runs); "
               "HTML report not written", file=sys.stderr)
         return code
