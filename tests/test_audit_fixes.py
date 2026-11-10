@@ -76,13 +76,13 @@ def test_cli_run_saves_partial_results_on_interrupt(tmp_path, monkeypatch):
     assert len(saved.runs.trajectories) == 2 and saved.runs.metadata["interrupted"] is True
 
 
-def interrupt_demo_at_third_run(monkeypatch):
+def interrupt_demo_at_third_run(monkeypatch, at=3):
     from swarmeval.examples import research_swarm
     real, made = research_swarm.make_swarm, []
 
     def make_swarm():
         made.append(1)
-        if len(made) == 3:
+        if len(made) == at:
             raise KeyboardInterrupt
         return real()
 
@@ -96,14 +96,17 @@ def test_cli_demo_returns_130_and_writes_outputs_on_interrupt(tmp_path, monkeypa
     assert len(saved.runs.trajectories) == 2 and saved.runs.metadata["interrupted"] is True
 
 
-def test_interrupted_demo_rejects_out_of_range_html_run_cleanly(tmp_path, monkeypatch):
-    """PR #8 review round 2: --run 5 passed the upfront check (8 planned runs),
-    but after an interrupt at 2 runs render_html raised a ValueError traceback."""
-    interrupt_demo_at_third_run(monkeypatch)
-    with pytest.raises(SystemExit) as ei:
-        no_escape(main, ["demo", "--trials", "1", "--out", str(tmp_path), "--html", str(tmp_path / "r.html"),
-                         "--run", "5"])
-    assert str(ei.value) == "swarmeval: --run 5 out of range (result has 2 runs)"
+@pytest.mark.parametrize("finished, run", [(2, "5"), (0, "0")])
+def test_interrupted_demo_skips_an_out_of_range_html_run_and_exits_130(tmp_path, monkeypatch, capsys,
+                                                                        finished, run):
+    """PR #8 review round 2: --run passed the upfront check (8 planned runs), but
+    after an interrupt fewer runs exist; the outputs are kept and the exit code
+    still reports the interrupt."""
+    interrupt_demo_at_third_run(monkeypatch, at=finished + 1)
+    code = no_escape(main, ["demo", "--trials", "1", "--out", str(tmp_path), "--html", str(tmp_path / "r.html"),
+                            "--run", run])
+    assert code == 130
+    assert f"--run {run} out of range (result has {finished} runs); HTML report not written" in capsys.readouterr().err
     assert (tmp_path / "baseline.json").exists() and not (tmp_path / "r.html").exists()
 
 

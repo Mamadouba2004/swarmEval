@@ -139,7 +139,11 @@ def cmd_demo(args: argparse.Namespace) -> int:
         print()
         print(render_trajectory(result.runs.trajectories[0]))
     _write_outputs(result, args.out)
-    _check_html_run(args, len(result.runs))  # an interrupt can leave fewer runs than planned
+    if args.html and not 0 <= (args.run or 0) < len(result.runs):
+        # only an interrupt leaves fewer runs than the upfront check allowed; keep its exit code
+        print(f"swarmeval: --run {args.run or 0} out of range (result has {len(result.runs)} runs); "
+              "HTML report not written", file=sys.stderr)
+        return code
     _write_html(result, args)
     return code
 
