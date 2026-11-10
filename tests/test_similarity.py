@@ -104,3 +104,9 @@ def test_resolve_similarity(monkeypatch):
 
 
 CUSTOM = LexicalSimilarity(threshold=0.5)
+
+
+def test_lexical_candidates_capped_when_one_phrase_is_everywhere():
+    sim = LexicalSimilarity(max_pairs=500)
+    pairs = sim.candidates([f"no reliable information found item {i}" for i in range(200)])
+    assert len(pairs) <= 500 and sim.truncated

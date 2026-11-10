@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from swarmeval import (EmbeddingSimilarity, LexicalSimilarity, RunContext, SimClock, Task, Trajectory,
-                       compute_redundancy, evaluate)
+from swarmeval import (EmbeddingSimilarity, EvaluationResult, LexicalSimilarity, RunContext, SimClock, Task,
+                       Trajectory, compute_redundancy, evaluate)
 from swarmeval.examples.research_swarm import build_benchmark, make_swarm
 from swarmeval.metrics import canonical_args, summarize_redundancy
 
@@ -225,3 +225,19 @@ def test_golden_demo_redundancy():
     assert s.tool_redundancy.mean == pytest.approx(1 / 3) and s.methods == {"lexical": 6}
     assert res.coordination.redundancy.artifact_redundancy.n == 6
     json.dumps(res.to_dict())
+
+
+def test_in_memory_run_compares_real_text_even_with_capture_off():
+    res = evaluate(make_swarm, build_benchmark(1), clock_factory=SimClock, capture_text=False)
+    assert not compute_redundancy(res.runs.trajectories[0]).degraded
+
+
+def test_saved_capture_off_run_stays_hash_only_and_save_does_not_mutate(tmp_path):
+    """Guard (passes before and after the fix): the fix must not flag the
+    in-memory run on save, and a saved run must still read as hash-only."""
+    res = evaluate(make_swarm, build_benchmark(1), clock_factory=SimClock, capture_text=False)
+    before = dict(res.runs.trajectories[0].metadata)
+    res.save(str(tmp_path / "r.json"))
+    assert res.runs.trajectories[0].metadata == before
+    loaded = EvaluationResult.load(str(tmp_path / "r.json")).runs.trajectories[0]
+    assert compute_redundancy(loaded).degraded

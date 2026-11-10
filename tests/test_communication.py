@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from swarmeval import RunContext, SimClock, Task, compute_communication, evaluate
+from swarmeval import RunContext, SimClock, Task, build_graph, compute_communication, evaluate
 from swarmeval.examples.research_swarm import build_benchmark, make_swarm
 from swarmeval.metrics import summarize_communication
 from swarmeval.metrics.communication import body_tokens
@@ -180,3 +180,15 @@ def test_demo_communication():
     assert s.hub_agents == {"coordinator": 6} and s.hub_share.mean == 1.0
     assert res.coordination.communication.comm_work_ratio.n == 6
     json.dumps(res.to_dict())
+
+
+def test_graph_and_communication_fan_agree_on_invocation_only_edge():
+    ctx = make_ctx()
+    with ctx.agent("a") as a:
+        with a.sub_agent("b"):                              # a invokes b; no message, no artifact
+            pass
+    traj = ctx.finish()
+    g = build_graph(traj)
+    cm = compute_communication(traj, graph=g)
+    assert g.fan_out("a") == cm.per_agent["a"].fan_out
+    assert g.fan_in("b") == cm.per_agent["b"].fan_in
