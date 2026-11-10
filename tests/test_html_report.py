@@ -160,3 +160,24 @@ def test_trial_label_is_escaped():
     res.runs.trajectories[0].trial = HOSTILE  # a hand-edited run file can carry any JSON value here
     doc = render_html(res)
     assert HOSTILE not in doc and "trial &lt;script&gt;" in doc
+
+
+def test_timeline_tooltips_escape_recorded_strings():
+    # Coverage-only regression test: these already pass; they pin the escaping
+    # of model, tool name, sender and message kind in timeline tooltips.
+    def run(task, ctx):
+        with ctx.agent("worker") as w:
+            with w.llm_call(model=HOSTILE + "m", input_tokens=1, output_tokens=1):
+                ctx.clock.sleep(1.0)
+            with w.tool_call(HOSTILE + "t"):
+                ctx.clock.sleep(1.0)
+        with ctx.agent(HOSTILE + "s") as s:
+            s.send("worker", "hi", kind=HOSTILE + "k")
+        return "out"
+    res = evaluate(FunctionSwarm(run), Benchmark("b", [Task(task_id="t", input="q")]), trials=1,
+                   clock_factory=SimClock)
+    timeline = re.search(r'<svg[^>]*aria-label="timeline".*?</svg>', render_html(res), re.S).group()
+    assert "<script" not in timeline
+    tips = [htmllib.unescape(t) for t in re.findall(r"<title>([^<]*)</title>", timeline)]
+    for s in ("m", "t", "s", "k"):
+        assert any(HOSTILE + s in t for t in tips), s
