@@ -159,14 +159,36 @@ def test_without_receive_the_message_edge_is_inferred_to_the_first_unit_after_th
     assert (edge.source, edge.target, edge.count, edge.inferred_count) == ("a", "b", 1, 1)
 
 
-def test_schema_v2_message_without_receive_is_not_inferred_as_delivered():
-    """v2 records every receive, so a message without one never arrived."""
+def test_schema_v2_message_without_receive_is_inferred_from_timing():
+    """inbox() reads record nothing, so v2 infers delivery like Phase 1."""
     traj = _send_receive(record_receive=False)
     g = build_graph(traj)
-    assert not g.edges_of("message")
+    (e,) = g.edges_of("message")
+    first_b = next(u for u in g.units if u.agent_id == "b" and u.kind == "llm")
+    assert e.inferred and e.dst == first_b.node_id
     (link,) = g.messages
-    assert link.receive_node is None and not link.received and not link.used
-    assert compute_contribution(traj, g)["a"].status == "unused"
+    assert link.receive_node == first_b.node_id and not link.received and link.used
+    assert compute_contribution(traj, g)["a"].status != "unused"
+
+
+def test_message_read_with_inbox_counts_as_delivered():
+    ctx = make_ctx()
+    clock = ctx.clock
+    with ctx.agent("b") as b:
+        llm(b, clock, 1.0)                     # unrelated work before the message
+    with ctx.agent("a") as a:
+        a.send("b", "use source X, not Y")
+    with ctx.agent("b") as b:
+        assert b.inbox()                       # peek: records no receive
+        llm(b, clock, 1.0)
+    traj = ctx.finish()
+    g = build_graph(traj)
+    (link,) = g.messages
+    second_b = [u for u in g.units if u.agent_id == "b" and u.kind == "llm"][1]
+    assert link.receive_node == second_b.node_id and not link.received and link.used
+    (e,) = g.edges_of("message")
+    assert e.inferred and e.dst == second_b.node_id
+    assert compute_contribution(traj, g)["a"].status != "unused"
 
 
 def test_receive_stamped_before_its_send_still_counts_as_received():

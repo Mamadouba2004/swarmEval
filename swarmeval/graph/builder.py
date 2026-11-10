@@ -9,10 +9,10 @@ Two views, built only from what was recorded:
   and parallelism analysis.
 
 Where the record is silent (Phase 1 data has no receive events, message ids or
-``derived_from``) an edge is either inferred from timing and flagged
-``inferred=True``, or missing.  ``Coverage`` says how much was recorded, so a
-reader knows how far the DAG can be trusted: missing edges under-count
-dependencies and over-state possible parallelism.
+``derived_from``; ``inbox()`` reads record nothing) an edge is either inferred
+from timing and flagged ``inferred=True``, or missing.  ``Coverage`` says how
+much was recorded, so a reader knows how far the DAG can be trusted: missing
+edges under-count dependencies and over-state possible parallelism.
 
 Events are appended when they complete but timestamped when they start, so
 everything here works on start-ordered units, never on event order.  Ties in
@@ -102,8 +102,9 @@ class AgentEdge:
 @dataclass
 class MessageLink:
     """What became of one message.  ``receive_node`` is the recorded receive
-    or, for Phase 1 data without one, the receiver's first unit after the send
-    (``received`` False); ``None`` means it never reached the receiver.
+    or, without one (Phase 1 data, or a message only read with ``inbox()``),
+    the receiver's first unit after the send (``received`` False); ``None``
+    means the receiver did nothing after it.
     ``received`` is True whenever a receive was recorded, even when its DAG
     edge was dropped because the receive is stamped before the send.  A
     message is ``used`` when the receiver consumed one of its artifacts or,
@@ -452,8 +453,8 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
        frontier at the child's start, and the parent's next units on the
        child's last units;
     4. *message*: send -> recorded receive (matched by message id); without
-       one, in Phase 1 data only, send -> the receiver's first unit after the
-       send (``inferred``);
+       one (Phase 1 data, or a message only read with ``inbox()``), send ->
+       the receiver's first unit after the send (``inferred``);
     5. *artifact*: produce -> genuine consumption only (ARTIFACT_USE, an
        LLM/tool call's ``input_artifacts``, another artifact's
        ``derived_from``); carrying an artifact in a message is not using it;
@@ -514,9 +515,9 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
             # a recorded receive means it arrived, even if the edge is dropped as out of order
             target = rcv
             b.add_edge(s, rcv, "message", ref=ev.message_id)
-        elif b.version is None:
-            # Phase 1 data has no receive events: infer delivery from timing.
-            # Schema v2 records every receive, so without one it never arrived.
+        else:
+            # no receive recorded (Phase 1 data, or a v2 inbox() peek, which
+            # records nothing): infer delivery from timing
             cands = by_agent.get(ev.receiver or "", [])
             i = bisect_left(starts.get(ev.receiver or "", []), s.start - EPS)
             for cand in cands[i:]:
