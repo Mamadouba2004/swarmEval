@@ -270,6 +270,24 @@ def test_coordination_failure_on_some_runs_warns(monkeypatch):
     assert res.coordination.n_runs == 8
 
 
+@pytest.mark.parametrize("n_runs", [1, 2])
+def test_odd_traces_failing_every_run_keep_the_evaluation(monkeypatch, n_runs):
+    """One run, or runs failing for different reasons, are odd traces, not a configuration error."""
+    ev = sys.modules["swarmeval.evaluate"]
+    runs = _demo_runs()
+    runs.trajectories = runs.trajectories[:n_runs]
+    kinds = iter([KeyError("odd trace"), ValueError("another odd trace")])
+
+    def odd(traj, **kw):
+        raise next(kinds)
+
+    monkeypatch.setattr(ev, "compute_coordination", odd)
+    with pytest.warns(UserWarning, match=f"failed on {n_runs}/{n_runs} runs"):
+        res = analyze_runs(runs)
+    assert res.coordination is None and len(res.coordination_errors) == n_runs
+    assert len(res.runs) == n_runs and res.performance.n_runs == n_runs
+
+
 def test_coordination_failure_on_every_run_raises(monkeypatch):
     ev = sys.modules["swarmeval.evaluate"]  # the package re-exports evaluate() under the same name
     runs = _demo_runs()
