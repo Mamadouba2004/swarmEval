@@ -593,6 +593,19 @@ def test_contribution_row_keeps_long_agent_id():
     assert any(l.startswith("  " + HUB + " ") for l in section.splitlines())
 
 
+def test_coordination_box_shows_a_run_whose_analysis_failed_alone(monkeypatch):
+    ev = sys.modules["swarmeval.evaluate"]
+
+    def odd(traj, **kw):
+        raise KeyError("odd trace")
+
+    monkeypatch.setattr(ev, "compute_coordination", odd)
+    with pytest.warns(UserWarning, match="failed on 1/1 runs"):
+        res = analyze_runs(RunSet("l", "b", [fan_out_trajectory(parallel=True)]))
+    assert res.coordination is None
+    assert "Analysis Failed" in render_coordination(res) and "1/1 runs: KeyError" in render_coordination(res)
+
+
 def test_coordination_box_shows_failed_runs(monkeypatch):
     ev = sys.modules["swarmeval.evaluate"]   # the package attribute is the evaluate() function
     real, calls = ev.compute_coordination, []

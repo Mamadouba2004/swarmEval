@@ -136,24 +136,28 @@ def _wrap(prefix: str, text: str, indent: int, width: int = 104) -> List[str]:
     return textwrap.wrap(text, width=width, initial_indent=prefix, subsequent_indent=" " * indent) or [prefix]
 
 
+def _failed_row(result: Any) -> tuple:
+    errors = result.coordination_errors
+    failed = f"{len(errors)}/{len(result.runs)} runs: {next(iter(errors.values()))}"
+    return ("Analysis Failed", textwrap.shorten(failed, _LABEL_W + _VALUE_W - 30, placeholder="…"), "⚠")
+
+
 def render_coordination(result: Any) -> str:
     """COORDINATION box, OBSERVED CONTRIBUTION table and DIAGNOSTICS list of
     an ``EvaluationResult`` with coordination analysis.  Every ratio is named
     with its definition; values are means over runs, with the range when the
     runs differ."""
     cs = result.coordination
+    errors = result.coordination_errors
     if cs is None:
-        return ""
+        return box("COORDINATION", [_failed_row(result)], width=_LABEL_W + _VALUE_W + 4) if errors else ""
     dep, comm, red, ctx = cs.dependency, cs.communication, cs.redundancy, cs.context
     sec = lambda x: f"{x:.1f}s"         # noqa: E731
     times = lambda x: f"{x:.2f}×"       # noqa: E731
     pct = lambda x: f"{x * 100:.1f}%"  # noqa: E731
     rows: List[Any] = [f"{cs.n_runs} runs  ·  values are means over runs (range)", None]
-    errors = result.coordination_errors
     if errors:
-        failed = f"{len(errors)}/{len(result.runs)} runs: {next(iter(errors.values()))}"
-        rows += [("Analysis Failed", textwrap.shorten(failed, _LABEL_W + _VALUE_W - 30, placeholder="…"), "⚠"),
-                 None]
+        rows += [_failed_row(result), None]
     if dep is not None:
         headroom = _ranged(dep.headroom_s, sec)
         if dep.headroom_ratio is not None:
