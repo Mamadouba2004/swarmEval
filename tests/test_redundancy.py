@@ -174,6 +174,23 @@ def test_artifact_redundancy_degraded_without_text():
     assert r.redundant_artifacts == 1
 
 
+def test_artifacts_truncated_on_save_are_degraded():
+    """Text over max_text_chars is cut when saved: two long reports that
+    share only their first 20k chars must not reload as exact copies."""
+    head = "".join(f"shared finding {i} about Aurora. " for i in range(700))[:20500]
+    ctx = make_ctx()
+    with ctx.agent("a") as a:
+        a.produce("report", head + "".join(f"alpha detail {i}. " for i in range(1400)), derived_from=[])
+    with ctx.agent("b") as b:
+        b.produce("report", head + "".join(f"beta claim {i} on Helix. " for i in range(1000)), derived_from=[])
+    traj = ctx.finish()
+    assert all(len(x.content) > 40000 for x in traj.artifacts.values())
+    live = compute_redundancy(traj)
+    assert live.redundant_artifacts == 0 and not live.degraded
+    loaded = compute_redundancy(Trajectory.from_dict(traj.to_dict()))
+    assert loaded.redundant_artifacts == 0 and loaded.degraded
+
+
 def test_forwarded_artifact_is_not_redundant():
     """A coordinator re-producing the answer a worker sent it is passing it on."""
     ctx = make_ctx()

@@ -561,7 +561,9 @@ class Trajectory:
     def from_dict(cls, d: Dict[str, Any]) -> "Trajectory":
         metadata = dict(d.get("metadata", {}))
         # loaded data went through the text policy: text may be gone for good
-        if not TextPolicy.from_metadata(metadata).capture:
+        texts = [a.get("content") for a in d.get("artifacts", {}).values()] + [d.get("final_output")]
+        if (not TextPolicy.from_metadata(metadata).capture
+                or any(isinstance(t, str) and t.endswith("…[truncated]") for t in texts)):
             metadata["text_truncated"] = True
         return cls(
             run_id=d["run_id"],
