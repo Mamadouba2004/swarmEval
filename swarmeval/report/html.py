@@ -384,9 +384,10 @@ def timeline_svg(traj: Trajectory, graph: ExecutionGraph, critical: Optional[Set
         if span is not None:
             end = span.end if span.end is not None else t_end
             failed = " failed" if span.status in _FAILED else ""
+            dur = f"{max(0.0, end - span.start):.2f}s" + (" (no end)" if span.end is None else "")
             parts.append(f'<rect class="span{failed}" x="{X(span.start):.1f}" y="{y + 2}" '
                          f'width="{max(1.0, X(end) - X(span.start)):.1f}" height="{row_h - 6}" rx="3">'
-                         f'<title>{_e(agent)} span {span.duration:.2f}s · {_e(span.status)}</title></rect>')
+                         f'<title>{_e(agent)} span {dur} · {_e(span.status)}</title></rect>')
         for u in by_span.get(sid if span is not None else None, []):
             ev = events.get(u.event_id)
             cp = " cp" if u.node_id in critical else ""

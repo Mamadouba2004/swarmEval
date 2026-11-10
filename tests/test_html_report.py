@@ -199,3 +199,20 @@ def test_edge_tooltip_does_not_double_count_undelivered_messages():
     tip = htmllib.unescape(re.search(r'class="e message inf"[^>]*><title>([^<]*)</title>', doc).group(1))
     assert "2 never delivered" in tip
     assert "inferred" not in tip, tip
+
+
+def test_open_span_tooltip_matches_drawn_bar():
+    def run(task, ctx):
+        with ctx.agent("crashed") as a:
+            with a.llm_call(model="m", input_tokens=1, output_tokens=1):
+                ctx.clock.sleep(2.0)
+        with ctx.agent("other"):
+            ctx.clock.sleep(1.0)
+        return "out"
+    res = evaluate(FunctionSwarm(run), Benchmark("b", [Task(task_id="t", input="q")]), trials=1,
+                   clock_factory=SimClock, coordination=False)
+    traj = res.runs.trajectories[0]
+    span = next(s for s in traj.spans.values() if s.agent_id == "crashed")
+    span.end = None  # e.g. the process died before the span closed; the bar runs to the end of the run
+    doc = render_html(res)
+    assert re.search(r"<title>crashed span 3\.00s \(no end\)", doc), re.findall(r"<title>crashed span[^<]*", doc)
