@@ -218,3 +218,26 @@ def test_analyze_runs_without_coordination():
     assert res.per_run_coordination is None and res.coordination is None
     d = res.to_dict()
     assert d["coordination"] is None and d["per_run"][0]["dead_agents"] is None
+
+
+def test_coordination_failure_on_one_run_keeps_the_evaluation(monkeypatch):
+    import swarmeval.metrics.coordination as coordination
+    runs = RunSet.load(FIXTURE)
+    bad = runs.trajectories[0].run_id
+    real = coordination.build_graph
+
+    def build_graph(traj):
+        if traj.run_id == bad:
+            raise KeyError("odd trace")
+        return real(traj)
+
+    monkeypatch.setattr(coordination, "build_graph", build_graph)
+    res = analyze_runs(runs)
+    assert len(res.per_run) == 2 and res.performance is not None
+    assert res.per_run_coordination[0] is None and res.per_run_coordination[1] is not None
+    assert res.coordination_errors == {bad: "KeyError: 'odd trace'"}
+    assert res.coordination.n_runs == 1
+    d = res.to_dict()
+    json.dumps(d)
+    assert d["coordination_errors"] == {bad: "KeyError: 'odd trace'"}
+    assert d["per_run"][0]["dead_agents"] is None and d["per_run"][1]["dead_agents"] is not None
