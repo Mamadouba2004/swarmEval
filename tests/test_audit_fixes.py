@@ -54,6 +54,30 @@ def test_cli_run_saves_partial_results_on_interrupt(tmp_path, monkeypatch):
     assert len(saved.runs.trajectories) == 2 and saved.runs.metadata["interrupted"] is True
 
 
+def interrupted_in_second_trial():
+    """5 tasks x 2 trials, Ctrl-C at the 8th run: trial 2 is partial."""
+    calls = []
+
+    def swarm(task, ctx):
+        calls.append(task.task_id)
+        if len(calls) == 8:
+            raise KeyboardInterrupt
+        return "42" if len(calls) <= 5 else "no"
+
+    return no_escape(evaluate, swarm, five_tasks(), trials=2, clock_factory=SimClock)
+
+
+def test_interrupted_header_and_per_trial_success_are_honest():
+    """PR #8 review: the header claimed "5 tasks x 2 trials = 7 runs" and the
+    partial trial's success rate was shown as if it were a full trial."""
+    res = interrupted_in_second_trial()
+    report = res.report()
+    header = next(l for l in report.splitlines() if "·" in l)
+    assert "= 7 runs" not in header and "7/10 runs" in header
+    assert res.performance.per_trial == [1.0]  # the partial trial is excluded
+    assert "per-trial success: 100.0%  (incomplete trial excluded)" in report
+
+
 # -- audit 2: a streamed call is not recorded as a $0 call -------------------- #
 def streaming_client(is_async=False):
     stream = object()  # an SDK stream has no .usage or .content

@@ -77,6 +77,8 @@ def compute_performance(trajectories: Sequence[Trajectory],
                             "cost_complete": all(ok for _, ok in task_costs[tid]),
                             "latency_s": mean([x.duration for x in ts]),
                             "category": ts[0].task.category, "difficulty": ts[0].task.difficulty}
-    pm.per_trial = [mean([1.0 if s else 0.0 for s in by_trial[i]]) for i in sorted(by_trial)]
+    # A trial cut short (interrupted run) is left out rather than shown as a full one.
+    pm.per_trial = [mean([1.0 if s else 0.0 for s in by_trial[i]]) for i in sorted(by_trial)
+                    if len(by_trial[i]) == pm.n_tasks]
     pm.evaluators = sorted({t.evaluation.evaluator for t in trajectories if t.evaluation})
     return pm
