@@ -14,8 +14,10 @@ The ``anthropic`` package is only imported when a client is not supplied.
 Calls from threads that do not carry the span's context (a bare
 ``ThreadPoolExecutor``) cannot be attributed; use ``ctx.parallel``.
 A streamed call (``stream=True``) has no usage yet: inside an agent span it is
-recorded as one LLM call of unknown cost (its duration covers only opening the
-stream), and inside ``span.llm_call`` it makes that call's cost unknown.
+recorded as one LLM call of unknown cost whose input tokens are an estimate;
+its output tokens and duration are not recorded (flagged ``input_tokens_estimated``
+and ``duration_unknown``).  Inside ``span.llm_call`` it makes that call's cost
+unknown.
 ``client.messages.stream(...)`` is not wrapped: those calls are not recorded.
 """
 from __future__ import annotations
@@ -24,6 +26,7 @@ import inspect
 from typing import Any, Callable, Optional
 
 from ..recorder import LLMCall, LLMResult, _current_llm_call, _current_span
+from ..schema import estimate_tokens
 
 DEFAULT_MODEL = "claude-opus-5"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -118,6 +121,12 @@ def _mark_streamed() -> None:
         active.metadata["cost_unknown"] = True
 
 
+def _mark_stream_call(call: LLMCall, kwargs: dict) -> None:
+    """The call closes when the stream is returned: no usage, output or real duration yet."""
+    call.input_tokens = estimate_tokens(kwargs.get("messages"))
+    call.metadata.update(cost_unknown=True, input_tokens_estimated=True, duration_unknown=True)
+
+
 def _wrap(original: Callable[..., Any]) -> Callable[..., Any]:
     if _is_async(original):
         async def acreate(*args: Any, **kwargs: Any) -> Any:
@@ -125,7 +134,7 @@ def _wrap(original: Callable[..., Any]) -> Callable[..., Any]:
                 span = _current_span.get()
                 if _current_llm_call.get() is None and span is not None:
                     with span.llm_call(model=kwargs.get("model"), prompt=kwargs.get("messages")) as call:
-                        call.metadata["cost_unknown"] = True  # a stream has no usage yet
+                        _mark_stream_call(call, kwargs)
                         return await original(*args, **kwargs)
                 _mark_streamed()
                 return await original(*args, **kwargs)
@@ -149,7 +158,7 @@ def _wrap(original: Callable[..., Any]) -> Callable[..., Any]:
             span = _current_span.get()
             if _current_llm_call.get() is None and span is not None:
                 with span.llm_call(model=kwargs.get("model"), prompt=kwargs.get("messages")) as call:
-                    call.metadata["cost_unknown"] = True  # a stream has no usage yet
+                    _mark_stream_call(call, kwargs)
                     return original(*args, **kwargs)
             _mark_streamed()
             return original(*args, **kwargs)

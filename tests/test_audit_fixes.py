@@ -17,7 +17,7 @@ from swarmeval.metrics.efficiency import compute_efficiency
 from swarmeval.metrics.performance import compute_performance
 from swarmeval.pricing import PricingTable
 from swarmeval.report.text import box
-from swarmeval.schema import Evaluation
+from swarmeval.schema import Evaluation, estimate_tokens
 
 
 def five_tasks():
@@ -209,6 +209,22 @@ def test_bare_streamed_call_is_recorded_with_unknown_cost(is_async):
     assert call.cost_usd is None
     eff = compute_efficiency(traj)
     assert eff.llm_calls == 1 and eff.cost_complete is False
+
+
+@pytest.mark.parametrize("is_async", [False, True])
+def test_bare_streamed_call_estimates_input_tokens_and_flags_unknown_duration(is_async):
+    """PR #8 review round 3: the call closed when the stream was returned, so it
+    showed 0 ms and 0 tokens; input tokens are now estimated from the prompt."""
+    stream, client = streaming_client(is_async)
+    messages = [{"role": "user", "content": "x" * 4000}]
+    ctx = started_ctx()
+    with ctx.agent("a"):
+        out = client.messages.create(model="claude-sonnet-5", messages=messages, stream=True)
+        out = asyncio.run(out) if is_async else out
+    (call,) = ctx.finish().llm_calls()
+    assert call.input_tokens == estimate_tokens(messages)
+    assert call.metadata["input_tokens_estimated"] is True and call.metadata["duration_unknown"] is True
+    assert call.cost_usd is None
 
 
 @pytest.mark.parametrize("is_async", [False, True])
