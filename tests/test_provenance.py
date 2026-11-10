@@ -2,6 +2,7 @@
 derived_from, wait targets -- and that Phase 1 data still loads."""
 import json
 import os
+import sys
 import threading
 
 import pytest
@@ -232,7 +233,8 @@ def test_coordination_failure_on_one_run_keeps_the_evaluation(monkeypatch):
         return real(traj)
 
     monkeypatch.setattr(coordination, "build_graph", build_graph)
-    res = analyze_runs(runs)
+    with pytest.warns(UserWarning, match="failed on 1/2 runs"):
+        res = analyze_runs(runs)
     assert len(res.per_run) == 2 and res.performance is not None
     assert res.per_run_coordination[0] is None and res.per_run_coordination[1] is not None
     assert res.coordination_errors == {bad: "KeyError: 'odd trace'"}
@@ -241,3 +243,40 @@ def test_coordination_failure_on_one_run_keeps_the_evaluation(monkeypatch):
     json.dumps(d)
     assert d["coordination_errors"] == {bad: "KeyError: 'odd trace'"}
     assert d["per_run"][0]["dead_agents"] is None and d["per_run"][1]["dead_agents"] is not None
+
+
+def _demo_runs():
+    from swarmeval import evaluate
+    from swarmeval.examples.research_swarm import build_benchmark, make_swarm
+    return evaluate(make_swarm, build_benchmark(8), trials=2, clock_factory=SimClock).runs
+
+
+def test_coordination_failure_on_some_runs_warns(monkeypatch):
+    ev = sys.modules["swarmeval.evaluate"]  # the package re-exports evaluate() under the same name
+    runs = _demo_runs()
+    assert len(runs) == 16
+    real, calls = ev.compute_coordination, []
+
+    def flaky(traj, **kw):
+        calls.append(traj.run_id)
+        if len(calls) % 2 == 0:
+            raise RuntimeError("boom")
+        return real(traj, **kw)
+
+    monkeypatch.setattr(ev, "compute_coordination", flaky)
+    with pytest.warns(UserWarning, match=r"coordination analysis failed on 8/16 runs: RuntimeError: boom"):
+        res = analyze_runs(runs)
+    assert len(res.coordination_errors) == 8
+    assert res.coordination.n_runs == 8
+
+
+def test_coordination_failure_on_every_run_raises(monkeypatch):
+    ev = sys.modules["swarmeval.evaluate"]  # the package re-exports evaluate() under the same name
+    runs = _demo_runs()
+
+    def missing_dep(traj, **kw):
+        raise ImportError("sentence-transformers is not installed")
+
+    monkeypatch.setattr(ev, "compute_coordination", missing_dep)
+    with pytest.raises(ImportError, match="sentence-transformers"):
+        analyze_runs(runs)

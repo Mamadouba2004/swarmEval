@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence
@@ -228,6 +229,7 @@ def analyze_runs(runs: RunSet, pricing: Optional[PricingTable] = None, coordinat
     per_run_coord: Optional[List[Optional[CoordinationMetrics]]] = None
     coord_summary: Optional[CoordinationSummary] = None
     errors: Dict[str, str] = {}
+    first_exc: Optional[Exception] = None
     if coordination:
         similarity = resolve_similarity(similarity)   # once, not per run
         per_run_coord = []
@@ -238,8 +240,14 @@ def analyze_runs(runs: RunSet, pricing: Optional[PricingTable] = None, coordinat
             except Exception as exc:  # an odd trace must not cost the plain evaluation
                 cm = None
                 errors[t.run_id] = f"{type(exc).__name__}: {exc}"
+                first_exc = first_exc or exc
             per_run_coord.append(cm)
         done = [cm for cm in per_run_coord if cm is not None]
+        if first_exc is not None:
+            if not done:  # e.g. a missing optional dependency, not an odd trace
+                raise first_exc
+            warnings.warn(f"coordination analysis failed on {len(per_run_coord) - len(done)}/{len(per_run_coord)} "
+                          f"runs: {type(first_exc).__name__}: {first_exc}", stacklevel=2)
         coord_summary = summarize_coordination(done) if done else None
     return EvaluationResult(runs, per_run, performance, efficiency, per_run_coordination=per_run_coord,
                             coordination=coord_summary, coordination_errors=errors)

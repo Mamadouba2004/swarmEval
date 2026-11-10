@@ -7,12 +7,13 @@ name = "swarmeval"
 version = "0.1.0"
 description = "Evaluation, observability, diagnostics and causal analysis for multi-agent AI systems."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [{name = "Rohit Penta"}]
 keywords = ["multi-agent", "evaluation", "observability", "llm", "agents", "ablation"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]

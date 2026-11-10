@@ -197,18 +197,19 @@ def _provenance_coverage(traj: Trajectory, graph: ExecutionGraph, agent: str, ow
                          receivers: Dict[str, Set[str]]) -> Optional[float]:
     """Share of the agent's outputs (artifacts, and messages carrying
     artifacts) whose possible consumers record what they use.  An artifact
-    sent in messages can be used by those messages' receivers; one never
-    sent, by any other agent active after it was produced."""
+    sent in messages to others can be used by those messages' receivers; one
+    never sent to another agent, by any other agent active after it was
+    produced.  An artifact nobody else could use is no evidence either way."""
     instrumented = graph.coverage.consumers_instrumented
     checks: List[bool] = []
     for a in own:
         art = traj.artifacts[a]
-        if receivers.get(a):
-            possible = receivers[a] - {agent}
-        else:
+        possible = receivers.get(a, set()) - {agent}
+        if not possible:
             possible = {s.agent_id for s in traj.spans.values()
                         if s.agent_id != agent and (s.end is None or s.end >= art.produced_at - EPS)}
-        checks.append(all(instrumented.get(c, False) for c in possible))
+        if possible:  # all() over nobody would count as covered
+            checks.append(all(instrumented.get(c, False) for c in possible))
     for m in graph.messages:
         if m.sender == agent and m.artifacts and m.receiver is not None and m.receiver != agent:
             checks.append(instrumented.get(m.receiver, False))
