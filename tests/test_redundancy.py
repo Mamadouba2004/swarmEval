@@ -187,6 +187,14 @@ def test_artifact_redundancy_with_embeddings():
     assert {p["name"] for p in r.redundant_artifact_pairs} == {"dup", "near", "check"}
 
 
+def test_summary_counts_similarity_truncated_runs():
+    runs = [compute_redundancy(_artifacts(), similarity=LexicalSimilarity(max_pairs=1)),
+            compute_redundancy(_artifacts())]
+    assert runs[0].similarity_truncated and not runs[1].similarity_truncated
+    s = summarize_redundancy(runs)
+    assert s.similarity_truncated_runs == 1 and s.to_dict()["similarity_truncated_runs"] == 1
+
+
 def test_golden_demo_redundancy():
     """researcher_c is given researcher_a's scope (s1, s2), so its two
     web_search calls repeat a's: 2 accidental duplicates of 6 tool calls.

@@ -273,7 +273,9 @@ def _known(values: Sequence[Optional[float]]) -> Optional[Summary]:
 class RedundancySummary:
     """Redundancy over runs.  Ratio summaries cover the runs where the ratio
     is defined (``n``).  ``methods`` counts runs per artifact comparison
-    method; ``degraded_runs`` how many compared hashes only."""
+    method; ``degraded_runs`` how many compared hashes only;
+    ``similarity_truncated_runs`` how many hit the similarity backend's pair
+    cap, so their artifact redundancy may be under-counted."""
     n_runs: int
     tool_redundancy: Optional[Summary]
     artifact_redundancy: Optional[Summary]
@@ -285,6 +287,7 @@ class RedundancySummary:
     intentional_artifacts: Summary
     methods: Dict[str, int] = field(default_factory=dict)
     degraded_runs: int = 0
+    similarity_truncated_runs: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {k: (v.to_dict() if isinstance(v, Summary) else v) for k, v in self.__dict__.items()}
@@ -303,4 +306,5 @@ def summarize_redundancy(per_run: Sequence[RedundancyMetrics]) -> RedundancySumm
         redundant_artifacts=S([r.redundant_artifacts for r in per_run]),
         intentional_artifacts=S([r.intentional_artifacts for r in per_run]),
         methods=dict(Counter(r.method for r in per_run if r.artifacts)),
-        degraded_runs=sum(1 for r in per_run if r.degraded))
+        degraded_runs=sum(1 for r in per_run if r.degraded),
+        similarity_truncated_runs=sum(1 for r in per_run if r.similarity_truncated))
