@@ -16,6 +16,7 @@ from swarmeval.integrations.anthropic import instrument_client
 from swarmeval.metrics.efficiency import compute_efficiency
 from swarmeval.pricing import PricingTable
 from swarmeval.report.text import box
+from swarmeval.schema import Evaluation
 
 
 def five_tasks():
@@ -169,9 +170,35 @@ def test_evaluator_error_is_flagged_explicitly():
     for t in res.runs.trajectories:
         t.evaluation.details["reason"] = "crashed"
     assert analyze_runs(res.runs).performance.evaluator_errors == 5
-    for t in res.runs.trajectories:  # as saved before the flag existed
+    for t in res.runs.trajectories:  # as saved before the flag existed (Phase 1: no schema version)
+        t.metadata.pop("schema_version")
         t.evaluation.details = {"reason": "evaluator error: typo"}
     assert analyze_runs(res.runs).performance.evaluator_errors == 5
+
+
+def one_task():
+    return Benchmark("b", [Task("t1", "q")])
+
+
+def test_working_evaluator_whose_reason_starts_like_an_error_is_not_an_evaluator_error():
+    """PR #8 review re-check: on schema-v2 runs only the explicit flag counts."""
+    def judge(task, output, traj):
+        return Evaluation(False, 0.0, "judge", {"reason": "evaluator error rate too high in output"})
+    res = evaluate(lambda t, c: "42", one_task(), evaluator=E.CallableEvaluator(judge), clock_factory=SimClock)
+    assert res.runs.trajectories[0].metadata["schema_version"] is not None
+    assert res.performance.evaluator_errors == 0
+
+
+def test_reason_prefix_still_counts_on_phase1_runs_and_a_raise_on_v2_runs():
+    res = evaluate(lambda t, c: "42", one_task(), evaluator=E.CallableEvaluator(lambda *a: True),
+                   clock_factory=SimClock)
+    (t,) = res.runs.trajectories
+    t.metadata.pop("schema_version")
+    t.evaluation.details = {"reason": "evaluator error: boom"}
+    assert analyze_runs(res.runs).performance.evaluator_errors == 1
+    res = evaluate(lambda t, c: "42", one_task(), evaluator=E.CallableEvaluator(broken), clock_factory=SimClock)
+    assert res.runs.trajectories[0].metadata["schema_version"] is not None
+    assert res.performance.evaluator_errors == 1
 
 
 # -- audit 4: composite weights must match its evaluators --------------------- #
