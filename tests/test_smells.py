@@ -594,7 +594,8 @@ def test_coordination_box_shows_failed_runs(monkeypatch):
     runs = [copy.deepcopy(traj) for _ in range(4)]
     for i, t in enumerate(runs):
         t.run_id = f"r{i}"
-    res = analyze_runs(RunSet("l", "b", runs))
+    with pytest.warns(UserWarning, match="failed on 2/4 runs"):
+        res = analyze_runs(RunSet("l", "b", runs))
     assert len(res.coordination_errors) == 2
     box = render_coordination(res).split("OBSERVED CONTRIBUTION", 1)[0]
     (line,) = [l for l in box.splitlines() if "Analysis Failed" in l]
