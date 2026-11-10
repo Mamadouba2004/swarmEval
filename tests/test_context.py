@@ -106,6 +106,20 @@ def test_messages_received_outside_the_receivers_span_count_as_relevant(in_other
     assert not bloat(cm)
 
 
+def test_message_read_in_an_earlier_span_counts_for_a_later_call():
+    ctx = make_ctx()
+    with ctx.agent("a") as a:
+        a.send("b", "m" * 40_000, kind="result")        # body 10,000 tokens
+    with ctx.agent("b") as b:
+        b.receive()                                     # read in b's first span
+    with ctx.agent("b") as b:
+        call(b, 10 + 10_000)                            # used in its second
+    cm = compute_coordination(ctx.finish())
+    c = next(c for c in cm.context.calls if c.agent_id == "b")
+    assert c.parts["messages"] == 10_000 and c.basis == "referenced"
+    assert not bloat(cm)
+
+
 def test_system_tokens_are_counted_relevant():
     ctx = make_ctx()
     with ctx.agent("a") as a:

@@ -5,9 +5,9 @@ For every LLM call:
 * **received** = the call's prompt tokens (input + cache read + cache write);
 * **relevant** = what the record shows the call had reason to read:
   the task input + the distinct artifacts the call took as input or its span
-  consumed before it + the bodies of messages its span received before it
-  (``content_tokens`` minus attached artifacts, which are counted as
-  artifacts) + earlier outputs of the same span (LLM outputs, tool results)
+  consumed before it + the bodies of messages its agent received before it,
+  in any span or none (``content_tokens`` minus attached artifacts, which
+  are counted as artifacts) + earlier outputs of the same span (LLM outputs, tool results)
   + ``metadata["system_tokens"]`` when the caller recorded its system prompt.
 * **excess** = max(0, received − relevant); **ratio** = received ÷ max(relevant, 1).
 
@@ -78,12 +78,12 @@ def compute_context(traj: Trajectory) -> ContextMetrics:
     seq = {ev.event_id: i for i, ev in enumerate(traj.events)}
     events = sorted(traj.events, key=lambda e: (round(e.timestamp, 9), seq[e.event_id]))
     by_span: Dict[str, List[Event]] = defaultdict(list)
-    spanless: Dict[str, List[Event]] = defaultdict(list)    # receives recorded outside the receiver's span
+    reads: Dict[str, List[Event]] = defaultdict(list)       # receives per agent, in any span or none
     for ev in events:
         if ev.span_id:
             by_span[ev.span_id].append(ev)
-        elif ev.event_type == EventType.MESSAGE_RECEIVE.value and ev.agent_id:
-            spanless[ev.agent_id].append(ev)
+        if ev.event_type == EventType.MESSAGE_RECEIVE.value and ev.agent_id:
+            reads[ev.agent_id].append(ev)
     sent = {ev.message_id: ev for ev in traj.messages() if ev.message_id}
     received_ids = {ev.message_id for ev in traj.events_of(EventType.MESSAGE_RECEIVE)}
     to_agent: Dict[str, List[Event]] = defaultdict(list)    # messages with no receive event
@@ -107,12 +107,11 @@ def compute_context(traj: Trajectory) -> ContextMetrics:
             et = ev.event_type
             if et in (EventType.ARTIFACT_USE.value, EventType.LLM_CALL.value, EventType.TOOL_CALL.value):
                 art_ids.update(ev.input_artifacts)
-            if et == EventType.MESSAGE_RECEIVE.value:
-                msg_ids.add(ev.message_id or "")
-            elif et in (EventType.LLM_CALL.value, EventType.TOOL_CALL.value) and ev.end_timestamp <= t0 + EPS:
+            if et in (EventType.LLM_CALL.value, EventType.TOOL_CALL.value) and ev.end_timestamp <= t0 + EPS:
                 # earlier output of this span (a call still running when this one started is not)
                 prior_out += ev.output_tokens if et == EventType.LLM_CALL.value else ev.content_tokens
-        msg_ids.update(ev.message_id or "" for ev in spanless.get(call.agent_id or "", [])
+        # a message the agent read earlier, in this span or another, is input it may carry
+        msg_ids.update(ev.message_id or "" for ev in reads.get(call.agent_id or "", [])
                        if ev.timestamp <= t0 + EPS)
         msg_body = sum(body_tokens(sent[i], traj) for i in msg_ids if i in sent)
         if call.agent_id:
