@@ -99,6 +99,26 @@ def test_nested_calls_are_not_double_counted_as_work():
     assert dep.work_s == pytest.approx(2.5) and dep.critical_path_s == pytest.approx(2.5)
 
 
+def agent_as_tool_run():
+    ctx = make_ctx()
+    clock = ctx.clock
+    with ctx.agent("boss") as b:
+        def ask_worker():
+            with ctx.agent("worker") as w:
+                llm(w, clock, 10.0)
+            return "r"
+        b.call_tool("worker", ask_worker)
+    return ctx.finish()
+
+
+@pytest.mark.parametrize("phase1", [False, True])
+def test_agent_run_inside_a_tool_call_is_not_double_counted_as_work(phase1):
+    traj = agent_as_tool_run()
+    dep = compute_dependency(as_phase1(traj) if phase1 else traj)
+    assert dep.work_s == pytest.approx(10.0) and dep.wall_s == pytest.approx(10.0)
+    assert dep.actual_parallelism == pytest.approx(1.0)
+
+
 def test_unrecorded_idle_time_is_reported_not_read_as_headroom():
     ctx = make_ctx()
     clock = ctx.clock

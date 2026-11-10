@@ -7,7 +7,8 @@ Built on the work-unit DAG of ``graph.builder``.  Definitions:
   and waits weigh 0).  No schedule of the recorded work, however parallel,
   could finish faster than this -- *if* the DAG holds every real dependency.
 * **work** (``work_s``) = Σ durations of top-level LLM/tool calls (calls nested
-  in another call are already inside their parent's time).
+  in another call are already inside their parent's time, and so are the calls
+  of an agent run inside another agent's call, e.g. an agent used as a tool).
 * **Actual parallelism** = work ÷ wall clock: how many calls ran at once on
   average.  **Potential parallelism** = work ÷ critical path: the most the
   recorded dependencies allow.
@@ -225,6 +226,33 @@ def message_cycles(traj: Trajectory, agents: Sequence[str]) -> List[List[str]]:
     return [c for c in tarjan_scc(nodes, adj) if len(c) >= 3]
 
 
+def _inside_calls(traj: Trajectory, graph: ExecutionGraph) -> Set[str]:
+    """Spans run inside another span's LLM/tool call, directly or through an
+    ancestor: recorded since schema v2; on Phase 1 data, a span lying inside a
+    call of one of its ancestor spans."""
+    spans = traj.spans
+    calls: Dict[str, List[Any]] = defaultdict(list)
+    for u in graph.units:
+        if u.kind in _CALL_KINDS:
+            calls[u.span_id].append(u)
+    out: Set[str] = set()
+    for sid, s in spans.items():
+        end = s.end if s.end is not None else s.start
+        cur: Optional[str] = sid
+        seen: Set[str] = set()
+        while cur in spans and cur not in seen:
+            seen.add(cur)
+            if graph.schema_version is not None:
+                hit = spans[cur].metadata.get("within_call") is not None
+            else:
+                hit = cur != sid and any(u.start <= s.start + EPS and end <= u.end + EPS for u in calls[cur])
+            if hit:
+                out.add(sid)
+                break
+            cur = spans[cur].parent_span_id
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Entry point
 # --------------------------------------------------------------------------- #
@@ -233,7 +261,8 @@ def compute_dependency(traj: Trajectory, graph: Optional[ExecutionGraph] = None,
     graph = graph or build_graph(traj)
     cp, inferred = critical_path(graph)
     out = DependencyMetrics(critical_path=cp, inferred_edges_on_path=inferred)
-    out.work_s = sum(u.weight for u in graph.dag_units if u.kind in _CALL_KINDS)
+    inside = _inside_calls(traj, graph)
+    out.work_s = sum(u.weight for u in graph.dag_units if u.kind in _CALL_KINDS and u.span_id not in inside)
     out.wall_s = efficiency.wall_clock_s if efficiency is not None else traj.duration
     out.depth = sum(1 for n in cp.node_ids if graph.unit(n).kind in _CALL_KINDS)
     if out.wall_s > EPS:

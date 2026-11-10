@@ -178,6 +178,7 @@ _current_llm_call: contextvars.ContextVar = contextvars.ContextVar("swarmeval_cu
 # A call started inside another call of the same span records the outer one as
 # ``metadata["within_call"]``: the graph needs to tell nesting (a tool run by
 # an LLM call) from ``gather``ed sibling calls, whose intervals can look alike.
+# A span opened inside a call records it the same way in ``span.metadata``.
 _current_call: contextvars.ContextVar = contextvars.ContextVar("swarmeval_current_call", default=None)
 
 
@@ -548,6 +549,9 @@ class AgentSpan:
         self.span = Span(self.span_id, self.agent_id, self.role,
                          self.parent.span_id if self.parent else None, start, model=self.model,
                          start_event_id=ev.event_id, metadata=dict(self.metadata))
+        outer = _current_call.get()
+        if outer is not None:   # e.g. an agent run as a tool: its time lies inside that call's
+            self.span.metadata["within_call"] = outer[1]
         with ctx._lock:
             ctx.trajectory.spans[self.span_id] = self.span
         self._token = _current_span.set(self)
