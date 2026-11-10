@@ -149,6 +149,21 @@ def test_delegated_tasks_with_default_kinds_are_not_ping_pong(reply_to):
     assert not of(compute_coordination(ctx.finish()), "agent_ping_pong")
 
 
+@pytest.mark.parametrize("reply_to", [False, True])
+def test_review_loop_of_plain_text_drafts_with_a_reviewer_is_ping_pong(reply_to):
+    ctx = make_ctx()
+    for i in range(6):                    # text-only drafts: no artifacts, the writer links nothing
+        with ctx.agent("writer") as w:
+            w.receive()
+            draft = w.send("rev", f"draft v{i}")
+        with ctx.agent("rev", role="reviewer") as r:
+            r.receive()
+            llm(r)
+            r.send("writer", f"fix issue {i}", reply_to=draft if reply_to else None)
+    pp = of(compute_coordination(ctx.finish()), "agent_ping_pong")
+    assert [(d.severity, d.evidence["alternations"]) for d in pp] == [("high", 11)]
+
+
 def test_same_artifact_attached_to_unrelated_tasks_is_not_ping_pong():
     ctx = make_ctx()
     with ctx.agent("coordinator") as b:

@@ -256,9 +256,11 @@ def _ping_pong(c: _Ctx) -> None:
     opener turning back continues it only with evidence that it is answering:
     a ``reply_to`` naming a message of the exchange, or a revision of an
     artifact carried in it (same name with a new id, or ``derived_from`` it).
+    Turning back to a checker (a reviewer or critic) always continues it.
     Otherwise it starts a new exchange, so a run of delegated tasks, each
-    answered once, is a series of round trips.  A loop in plain text with no
-    ``reply_to`` and no artifacts therefore does not fire."""
+    answered once, is a series of round trips.  A plain-text loop with a
+    responder that is not a checker, no ``reply_to`` and no artifacts
+    therefore does not fire."""
     cfg, arts = c.cfg, c.traj.artifacts
     pairs: Dict[Tuple[str, str], List[str]] = defaultdict(list)
     longest: Dict[Tuple[str, str], int] = defaultdict(int)
@@ -278,8 +280,8 @@ def _ping_pong(c: _Ctx) -> None:
         key = (a, b)
         senders, cur = pairs[key], ex.get(key)
         if cur is not None and senders[-1] != m.sender:
-            if m.sender != cur["opener"] or (m.reply_to and m.reply_to in cur["ids"]) or any(
-                    revises(x, cur["arts"]) for x in m.input_artifacts):
+            if m.sender != cur["opener"] or _is_checker(c.traj, m.receiver, c.roles) or (
+                    m.reply_to and m.reply_to in cur["ids"]) or any(revises(x, cur["arts"]) for x in m.input_artifacts):
                 cur["run"] += 1
                 longest[key] = max(longest[key], cur["run"])
             else:

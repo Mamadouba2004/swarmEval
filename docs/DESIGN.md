@@ -88,7 +88,7 @@ ESLint for agent architectures. Each smell is a *hypothesis from trajectory evid
 | Smell | Signal |
 |---|---|
 | Redundant delegation | several agents send one agent similar requests |
-| Agent ping-pong | repeated alternating exchanges between two agents (the opener turning back continues an exchange only with a `reply_to` into it or a revised artifact, otherwise it starts a fresh one, so answered delegations are not ping-pong; plain-text loops with neither are not detected) |
+| Agent ping-pong | repeated alternating exchanges between two agents (the opener turning back continues an exchange only toward a checker, with a `reply_to` into it, or with a revised artifact; otherwise it starts a fresh one, so answered delegations are not ping-pong; plain-text loops with a non-checker and no links are not detected) |
 | Over-agentization | many agents for a simple task; many low-contribution agents |
 | Under-specialization | "specialised" agents doing overlapping work |
 | Coordinator bottleneck | most messages pass through one agent; high token share; on the critical path; no bypass |
