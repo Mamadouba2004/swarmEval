@@ -95,16 +95,20 @@ def _write_outputs(result: EvaluationResult, out: Optional[str]) -> None:
 
 def _add_html_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--html", default=None, metavar="FILE", help="also write a standalone HTML report")
-    p.add_argument("--run", type=int, default=0, metavar="N",
-                   help="which run the HTML agent graph and timeline show (default 0)")
+    p.add_argument("--run", type=int, default=None, metavar="N",
+                   help="which run the HTML agent graph and timeline show (default 0; needs --html)")
+
+
+def _check_html_run(args: argparse.Namespace, n_runs: int) -> None:
+    """Reject a bad --run before any evaluation or output happens."""
+    if args.html and not 0 <= (args.run or 0) < n_runs:
+        raise SystemExit(f"swarmeval: --run {args.run or 0} out of range (result has {n_runs} runs)")
 
 
 def _write_html(result: EvaluationResult, args: argparse.Namespace) -> None:
     if not args.html:
         return
-    if not 0 <= args.run < len(result.runs):
-        raise SystemExit(f"swarmeval: --run {args.run} out of range (result has {len(result.runs)} runs)")
-    render_html(result, path=args.html, run_index=args.run)
+    render_html(result, path=args.html, run_index=args.run or 0)
     print(f"\nwrote HTML report to {args.html}")
 
 
@@ -120,8 +124,10 @@ def _write_plain_evaluation(exc: AnalysisFailed, out: Optional[str]) -> int:
 
 def cmd_demo(args: argparse.Namespace) -> int:
     from .examples.research_swarm import build_benchmark, make_swarm
+    bench = build_benchmark()
+    _check_html_run(args, len(bench) * args.trials)
     try:
-        result = evaluate(make_swarm, build_benchmark(), trials=args.trials, clock_factory=SimClock, progress=True,
+        result = evaluate(make_swarm, bench, trials=args.trials, clock_factory=SimClock, progress=True,
                           **_analysis_kwargs(args))
     except AnalysisFailed as exc:
         return _write_plain_evaluation(exc, args.out)
@@ -163,6 +169,7 @@ def _analysis_failed(exc: Exception) -> None:
 
 def cmd_report(args: argparse.Namespace) -> int:
     runs = _load_runs_or_exit(args.path)
+    _check_html_run(args, len(runs))
     pricing = PricingTable.load(args.pricing) if args.pricing else None
     code = 0
     try:
@@ -289,6 +296,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     g.set_defaults(fn=cmd_graph)
 
     args = p.parse_args(argv)
+    if args.cmd in ("demo", "report") and args.run is not None and not args.html:
+        (d if args.cmd == "demo" else rp).error("--run requires --html")
     return args.fn(args)
 
 

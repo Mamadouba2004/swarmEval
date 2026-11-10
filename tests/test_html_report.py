@@ -138,3 +138,18 @@ def test_language_lint(demo_html):
     text = visible_text(demo_html)
     for pattern in (r"\bcaus", r"contributed \d+%", r"responsible for"):
         assert not re.search(pattern, text, re.I), pattern
+
+
+def test_cli_run_checked_before_work_and_requires_html(tmp_path, capsys):
+    with pytest.raises(SystemExit, match="out of range"):
+        main(["report", FIXTURE, "--html", str(tmp_path / "bad.html"), "--run", "999"])
+    assert "Task Success" not in capsys.readouterr().out, "--run must be checked before the report is printed"
+    with pytest.raises(SystemExit, match="out of range"):
+        main(["demo", "--trials", "1", "--out", str(tmp_path / "out"), "--html", str(tmp_path / "d.html"),
+              "--run", "999"])
+    assert not (tmp_path / "out").exists(), "--run must be checked before outputs are written"
+    for cmd in (["report", FIXTURE], ["demo", "--trials", "1"]):
+        with pytest.raises(SystemExit) as exc:
+            main(cmd + ["--run", "1"])
+        assert exc.value.code == 2
+        assert "--run requires --html" in capsys.readouterr().err
