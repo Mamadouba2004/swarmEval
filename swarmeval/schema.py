@@ -95,9 +95,9 @@ def content_hash(obj: Any) -> str:
 def _normalize(obj: Any) -> Any:
     if isinstance(obj, (str, bool, int, float)) or obj is None:
         return obj  # strings as given: case and spacing matter in paths, ids and code
-        return obj
     if isinstance(obj, dict):
-        return {str(k): _normalize(v) for k, v in obj.items()}
+        # a typed key keeps 1 and "1" apart
+        return {k if isinstance(k, str) else f"{type(k).__name__}:{k!r}": _normalize(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_normalize(v) for v in obj]
     if isinstance(obj, (set, frozenset)):
@@ -108,12 +108,9 @@ def _normalize(obj: Any) -> Any:
 def canonical_args(args: Any) -> str:
     """Stable text form of tool arguments: key and set order are ignored,
     strings are compared as given (``{"query": "S1"}`` and ``{"query": "s1"}``
-    or ``" S1"`` differ)."""
-    norm = _normalize(args)
-    try:
-        return json.dumps(norm, sort_keys=True)
-    except (TypeError, ValueError):
-        return repr(norm)
+    or ``" S1"`` differ).  Other values are compared by ``repr``, so objects
+    whose repr contains a memory address won't match across runs."""
+    return json.dumps(_normalize(args), sort_keys=True, default=repr)
 
 
 def preview(obj: Any, limit: int = 240) -> str:

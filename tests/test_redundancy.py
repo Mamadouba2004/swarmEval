@@ -1,5 +1,6 @@
 """Redundancy: tool-call keys and duplicate classes, artifact redundancy."""
 import json
+from datetime import date
 
 import pytest
 
@@ -33,7 +34,7 @@ def test_canonical_args():
     assert canonical_args({"n": 1}) != canonical_args({"n": "1"})          # numbers stay numbers
     assert canonical_args({"x": ["A", {"B": "C"}]}) == canonical_args({"x": ["A", {"B": "C"}]})
     obj = object()
-    assert canonical_args({"x": obj}) == repr({"x": obj})                   # unserializable -> repr
+    assert canonical_args({"x": obj}) == json.dumps({"x": repr(obj)})       # unserializable -> repr
 
 
 def test_canonical_args_compares_strings_exactly():
@@ -45,6 +46,16 @@ def test_canonical_args_compares_strings_exactly():
     assert canonical_args({"text": "a\n"}) != canonical_args({"text": "a"})
     assert canonical_args({"q": " S1 "}) != canonical_args({"q": "S1"})
     assert canonical_args({"a": 1, "b": "x"}) == canonical_args({"b": "x", "a": 1})
+
+
+def test_canonical_args_with_unserialisable_values_ignores_key_order():
+    assert canonical_args({"a": date(2026, 1, 1), "b": 1}) == canonical_args({"b": 1, "a": date(2026, 1, 1)})
+
+
+def test_canonical_args_keeps_keys_of_different_types_apart():
+    both = canonical_args({1: "x", "1": "y"})
+    assert '"x"' in both and '"y"' in both
+    assert both != canonical_args({"1": "y"})
 
 
 def test_identical_args_are_duplicates():
