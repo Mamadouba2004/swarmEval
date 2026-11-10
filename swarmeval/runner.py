@@ -230,7 +230,8 @@ class SwarmRunner:
         try:
             return evaluator.evaluate(task, output, traj)
         except Exception as exc:
-            return Evaluation(False, 0.0, evaluator.name, {"reason": f"evaluator error: {exc}"})
+            return Evaluation(False, 0.0, evaluator.name, {"reason": f"evaluator error: {exc}",
+                                                         "evaluator_error": True})
 
     def run(self) -> RunSet:
         rs = RunSet(self.label, self.benchmark.name)

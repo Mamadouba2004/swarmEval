@@ -52,8 +52,10 @@ def compute_performance(trajectories: Sequence[Trajectory],
     if cons:
         pm.constraint_pass_rate = sum(1 for c in cons if c) / len(cons)
     pm.run_errors = sum(1 for t in trajectories if t.status != "success")
-    pm.evaluator_errors = sum(1 for t in trajectories if t.evaluation
-                              and str(t.evaluation.details.get("reason", "")).startswith("evaluator error"))
+    # The reason prefix counts runs saved before the explicit flag existed.
+    pm.evaluator_errors = sum(1 for t in trajectories if t.evaluation and (
+        t.evaluation.details.get("evaluator_error")
+        or str(t.evaluation.details.get("reason", "")).startswith("evaluator error")))
     if per_run is not None:
         costs = [(e.cost_usd, e.cost_complete) for e in per_run]
     else:

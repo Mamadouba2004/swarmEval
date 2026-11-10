@@ -10,6 +10,7 @@ import pytest
 
 from swarmeval import Benchmark, EvaluationResult, RunContext, SimClock, Task, evaluate, evaluators as E
 from swarmeval.cli import main
+from swarmeval.evaluate import analyze_runs
 from swarmeval.integrations.anthropic import instrument_client
 from swarmeval.metrics.efficiency import compute_efficiency
 from swarmeval.pricing import PricingTable
@@ -123,6 +124,19 @@ def test_evaluator_errors_survive_save_and_load(tmp_path):
     res = evaluate(lambda t, c: "42", five_tasks(), evaluator=E.CallableEvaluator(broken), clock_factory=SimClock)
     res.save(str(tmp_path / "r.json"))
     assert EvaluationResult.load(str(tmp_path / "r.json")).performance.evaluator_errors == 5
+
+
+def test_evaluator_error_is_flagged_explicitly():
+    """PR #8 review: a crashed evaluator is marked by a flag, not only by the
+    wording of its reason; runs saved before the flag still count."""
+    res = evaluate(lambda t, c: "42", five_tasks(), evaluator=E.CallableEvaluator(broken), clock_factory=SimClock)
+    assert all(t.evaluation.details["evaluator_error"] is True for t in res.runs.trajectories)
+    for t in res.runs.trajectories:
+        t.evaluation.details["reason"] = "crashed"
+    assert analyze_runs(res.runs).performance.evaluator_errors == 5
+    for t in res.runs.trajectories:  # as saved before the flag existed
+        t.evaluation.details = {"reason": "evaluator error: typo"}
+    assert analyze_runs(res.runs).performance.evaluator_errors == 5
 
 
 # -- audit 4: composite weights must match its evaluators --------------------- #
