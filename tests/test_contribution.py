@@ -64,8 +64,9 @@ def test_utilization_shares(demo):
 
 
 def _handoff(receiver_records_use):
-    """a produces notes and sends them to b; b uses them only if asked to,
-    and records some other use only when instrumented."""
+    """a produces notes and sends them to b, which never uses them.  When
+    instrumented, b reads them and then records a call on other inputs;
+    otherwise all of b's (unrecorded) work happens before it reads them."""
     ctx = make_ctx()
     clock = ctx.clock
     with ctx.agent("a") as a:
@@ -73,12 +74,13 @@ def _handoff(receiver_records_use):
         art = a.produce("notes", "facts")
         a.send("b", "notes", artifacts=[art])
     with ctx.agent("b") as b:
-        b.receive()
         if receiver_records_use:
+            b.receive()
             other = b.produce("own", "b's own work", derived_from=[])
             llm(b, clock, 1.0, input_artifacts=[other])
         else:
             llm(b, clock, 1.0)
+            b.receive()
         final = b.produce("final", "answer")
     ctx.set_output("answer", artifacts=[final])
     return ctx.finish()
@@ -117,6 +119,29 @@ def test_empty_derived_from_does_not_make_an_agent_instrumented():
     cm = compute_coordination(ctx.finish())
     assert cm.coverage.consumers_instrumented["b"] is False
     assert cm.contribution["a"].provenance_coverage == 0.0 and cm.contribution["a"].dead is not True
+
+
+def test_reading_an_artifact_message_in_a_call_without_recorded_inputs_counts_as_use():
+    """b records inputs on one call, then reads a's message in a call that
+    lists none: the content may have been used, so a is not dead.  A later
+    call that lists *other* inputs is recorded non-use (see _handoff)."""
+    ctx = make_ctx()
+    clock = ctx.clock
+    with ctx.agent("a") as a:
+        art = a.produce("notes", "facts")
+        a.send("b", "notes", artifacts=[art])
+    with ctx.agent("b") as b:
+        own = b.produce("own", "b's own work", derived_from=[])
+        llm(b, clock, 1.0, input_artifacts=[own])
+        b.receive()
+        llm(b, clock, 1.0)                              # reads the notes' text, lists no artifact
+        final = b.produce("final", "answer")
+    ctx.set_output("answer", artifacts=[final])
+    cm = compute_coordination(ctx.finish())
+    (link,) = cm.graph.messages
+    assert link.received and link.used and link.used_inferred
+    a_c = cm.contribution["a"]
+    assert a_c.provenance_coverage == 1.0 and a_c.messages_used == 1 and a_c.dead is False
 
 
 def test_consumption_and_lineage_fallback_without_derived_from():

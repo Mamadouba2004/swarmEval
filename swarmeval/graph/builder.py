@@ -103,10 +103,12 @@ class AgentEdge:
 class MessageLink:
     """What became of one message.  ``receive_node`` is the recorded receive
     or, for Phase 1 data without one, the receiver's first unit after the send
-    (``received`` False); ``None`` means it never reached the receiver.  A message carrying
-    artifacts is ``used`` when the receiver consumed one of them; one without
-    artifacts counts as used when the receiver did any LLM/tool work after
-    receiving it -- a timing heuristic, flagged ``used_inferred``."""
+    (``received`` False); ``None`` means it never reached the receiver.  A
+    message is ``used`` when the receiver consumed one of its artifacts or,
+    failing that, did LLM/tool work after receiving it -- a timing heuristic,
+    flagged ``used_inferred``.  For a message carrying artifacts only calls
+    that record no ``input_artifacts`` count: one listing other inputs shows
+    the artifacts were not used."""
     send_node: str
     receive_node: Optional[str]
     message_id: Optional[str]
@@ -523,11 +525,13 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
         arts = list(ev.input_artifacts)
         used, used_inferred = False, False
         if target is not None:
-            if arts:
-                used = any(t >= s.start - EPS for a in arts for t in used_by.get((a, ev.receiver), []))
-            else:
+            used = any(t >= s.start - EPS for a in arts for t in used_by.get((a, ev.receiver), []))
+            if not used:
+                # a later call may have used the content; for a message with
+                # artifacts, a call listing other inputs is recorded non-use
                 t0 = target.start
                 used = any(x.kind in _CALL_KINDS and x.start >= t0 - EPS
+                           and not (arts and b.ev[x.event_id].input_artifacts)
                            for x in by_agent.get(ev.receiver or "", []))
                 used_inferred = used
         links.append(MessageLink(s.node_id, target.node_id if target else None, ev.message_id, ev.sender,

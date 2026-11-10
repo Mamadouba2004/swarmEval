@@ -192,7 +192,8 @@ def test_forwarding_an_artifact_is_not_consuming_it():
     assert ("a", "b", "artifact") in kinds and ("a", "hub", "artifact") not in kinds
     a_to_hub = next(m for m in g.messages if m.sender == "a")
     hub_to_b = next(m for m in g.messages if m.sender == "hub")
-    assert not a_to_hub.used and hub_to_b.used
+    assert a_to_hub.used_inferred                  # hub's call may have read the text, not the notes
+    assert hub_to_b.used and not hub_to_b.used_inferred
 
 
 def test_invocation_edges_link_parent_frontier_child_and_resume():
