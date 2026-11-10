@@ -251,7 +251,7 @@ def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: Optional["Coordinatio
                 for b in (mag, -mag):
                     cx_, cy_ = mx0 - dy / length * b, my0 + dx / length * b
                     if _edge_clear(sx, sy, tx, ty, cx_, cy_, pos, (e.source, e.target)):
-                        bend, qx, qy = b, cx_, cy_
+                        qx, qy = cx_, cy_
                         break
                 else:
                     continue
