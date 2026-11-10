@@ -257,6 +257,17 @@ def test_over_agentization_on_a_simple_task():
     assert "over_agentization" not in names(many)     # nobody unused, task difficulty unknown
 
 
+def test_over_agentization_keeps_agent_ids_case():
+    ctx = make_ctx()
+    for a in ("Lead", "Writer", "ResearcherC", "QA_Bot"):
+        with ctx.agent(a) as s:
+            llm(s)
+            if a in ("ResearcherC", "QA_Bot"):
+                s.produce("notes", "unused notes")      # output that reaches nobody
+    d = of(compute_coordination(ctx.finish()), "over_agentization")
+    assert len(d) == 1 and "(ResearcherC and QA_Bot)" in d[0].observation
+
+
 def test_late_information_and_premature_synthesis():
     ctx = make_ctx()
     with ctx.agent("writer") as w:

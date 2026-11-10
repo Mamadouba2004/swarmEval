@@ -329,8 +329,9 @@ def _over_agentization(c: _Ctx) -> None:
     sev = "medium" if many else "low"
     if many and simple:
         sev = "high"
+    text = "; ".join(facts)
     c.add("over_agentization", _cap(sev, "low") if inferred else sev, low or agents,
-          "; ".join(facts).capitalize() + ".",
+          text[:1].upper() + text[1:] + ".",          # not capitalize(): it lowercases agent ids
           "The swarm may be using more agents than the task needs; extra agents are not bad in themselves "
           "if they add enough value for their cost.",
           f"Re-run with {_names(low) if low else 'fewer agents'} removed and compare success and cost.",
