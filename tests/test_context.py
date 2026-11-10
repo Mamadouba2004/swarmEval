@@ -89,6 +89,23 @@ def test_messages_read_without_a_receive_are_attributed_by_timing():
     assert by_agent["v"].parts["messages"] == 10 and by_agent["v"].basis == "inferred"
 
 
+@pytest.mark.parametrize("in_other_span", [False, True])
+def test_messages_received_outside_the_receivers_span_count_as_relevant(in_other_span):
+    ctx = make_ctx()
+    with ctx.agent("a") as a:
+        a.send("b", "m" * 40_000, kind="result")        # body 10,000 tokens
+        if in_other_span:
+            ctx.receive("b")                            # a's span is active: recorded with no span
+    if not in_other_span:
+        ctx.receive("b")                                # before b opens its span
+    with ctx.agent("b") as b:
+        call(b, 10 + 10_000)
+    cm = compute_coordination(ctx.finish())
+    c = next(c for c in cm.context.calls if c.agent_id == "b")
+    assert c.parts["messages"] == 10_000 and c.basis == "referenced"
+    assert not bloat(cm)
+
+
 def test_system_tokens_are_counted_relevant():
     ctx = make_ctx()
     with ctx.agent("a") as a:

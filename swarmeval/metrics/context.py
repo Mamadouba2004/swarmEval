@@ -78,9 +78,12 @@ def compute_context(traj: Trajectory) -> ContextMetrics:
     seq = {ev.event_id: i for i, ev in enumerate(traj.events)}
     events = sorted(traj.events, key=lambda e: (round(e.timestamp, 9), seq[e.event_id]))
     by_span: Dict[str, List[Event]] = defaultdict(list)
+    spanless: Dict[str, List[Event]] = defaultdict(list)    # receives recorded outside the receiver's span
     for ev in events:
         if ev.span_id:
             by_span[ev.span_id].append(ev)
+        elif ev.event_type == EventType.MESSAGE_RECEIVE.value and ev.agent_id:
+            spanless[ev.agent_id].append(ev)
     sent = {ev.message_id: ev for ev in traj.messages() if ev.message_id}
     received_ids = {ev.message_id for ev in traj.events_of(EventType.MESSAGE_RECEIVE)}
     to_agent: Dict[str, List[Event]] = defaultdict(list)    # messages with no receive event
@@ -96,7 +99,8 @@ def compute_context(traj: Trajectory) -> ContextMetrics:
             continue
         t0 = call.timestamp
         art_ids: Set[str] = set(call.input_artifacts)
-        msg_body, prior_out, inferred = 0, 0, False
+        msg_ids: Set[str] = set()       # each received message counts once per call
+        prior_out, inferred = 0, False
         for ev in by_span.get(call.span_id or "", []):
             if ev.event_id == call.event_id or ev.timestamp > t0 + EPS:
                 continue
@@ -104,12 +108,13 @@ def compute_context(traj: Trajectory) -> ContextMetrics:
             if et in (EventType.ARTIFACT_USE.value, EventType.LLM_CALL.value, EventType.TOOL_CALL.value):
                 art_ids.update(ev.input_artifacts)
             if et == EventType.MESSAGE_RECEIVE.value:
-                m = sent.get(ev.message_id or "")
-                if m is not None:
-                    msg_body += body_tokens(m, traj)
+                msg_ids.add(ev.message_id or "")
             elif et in (EventType.LLM_CALL.value, EventType.TOOL_CALL.value) and ev.end_timestamp <= t0 + EPS:
                 # earlier output of this span (a call still running when this one started is not)
                 prior_out += ev.output_tokens if et == EventType.LLM_CALL.value else ev.content_tokens
+        msg_ids.update(ev.message_id or "" for ev in spanless.get(call.agent_id or "", [])
+                       if ev.timestamp <= t0 + EPS)
+        msg_body = sum(body_tokens(sent[i], traj) for i in msg_ids if i in sent)
         if call.agent_id:
             msgs = [m for m in to_agent.get(call.agent_id, []) if m.timestamp <= t0 + EPS]
             if msgs:
