@@ -139,3 +139,11 @@ def test_box_keeps_long_values_and_flags():
     out = box("SWARM EVALUATION", [("Tokens / Run", value, "⚠"), "short"])
     assert value in out and "⚠" in out
     assert len({len(line) for line in out.splitlines()}) == 1
+
+
+def test_box_keeps_value_and_flag_after_a_long_label():
+    """PR #8 review: a label past 28 characters pushed the value off the line."""
+    label = "Cost / Successful Task (all agents)"
+    out = box("SWARM EVALUATION", [(label, "$0.1234", "⚠")])
+    assert label in out and "$0.1234" in out and "⚠" in out
+    assert len({len(line) for line in out.splitlines()}) == 1

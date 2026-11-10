@@ -42,7 +42,8 @@ def box(title: str, rows: Sequence[Any], width: int = 58) -> str:
         if isinstance(row, tuple):
             label, value = row[0], row[1]
             flag = row[2] if len(row) > 2 else ""
-            line = f" {label:<28}{value:>{inner - 32}} {flag:<2}"
+            lw = max(28, len(label))
+            line = f" {label:<{lw}}{value:>{inner - 4 - lw}} {flag:<2}"
         else:
             line = f" {row}"
         out.append("│" + line[:inner].ljust(inner) + "│")
