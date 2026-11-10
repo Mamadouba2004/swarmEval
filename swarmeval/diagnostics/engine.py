@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from .smells import SEVERITIES, SEVERITY_RANK, Diagnostic
 
@@ -68,12 +68,13 @@ class DiagnosticsReport:
 def summarize_diagnostics(per_run: Union[Mapping[str, Sequence[Diagnostic]], Sequence[Sequence[Diagnostic]]],
                           n_runs: Optional[int] = None) -> DiagnosticsReport:
     """``per_run`` maps run id → that run's diagnostics, or is a list with one
-    diagnostics list per run.  Include runs without smells (as empty lists)
+    diagnostics list per run (named by their ``run_id``, so runs sharing an id
+    still count separately).  Include runs without smells (as empty lists)
     or pass ``n_runs``: they are part of the prevalence denominator."""
     if isinstance(per_run, Mapping):
         runs: List[Tuple[str, Sequence[Diagnostic]]] = list(per_run.items())
     else:
-        runs = [(str(i), ds) for i, ds in enumerate(per_run)]
+        runs = [(next((d.run_id for d in ds if d.run_id), str(i)), ds) for i, ds in enumerate(per_run)]
     n = n_runs if n_runs is not None else len(runs)
     by_smell: Dict[str, Dict[int, List[Diagnostic]]] = defaultdict(lambda: defaultdict(list))
     total = 0
@@ -107,7 +108,3 @@ def summarize_diagnostics(per_run: Union[Mapping[str, Sequence[Diagnostic]], Seq
     out.sort(key=lambda s: (-SEVERITY_RANK[s.max_severity], -s.prevalence, s.smell))
     return DiagnosticsReport(n_runs=n, smells=out, total=total)
 
-
-def diagnostics_by_run(runs: Iterable[Any]) -> Dict[str, List[Diagnostic]]:
-    """run id → diagnostics, from ``CoordinationMetrics`` objects."""
-    return {cm.run_id: list(cm.diagnostics or []) for cm in runs}

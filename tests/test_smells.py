@@ -1,11 +1,12 @@
 """Swarm smells (diagnostics/smells.py) and their prevalence over runs (diagnostics/engine.py)."""
+import copy
 import json
 import re
 from functools import partial
 
 import pytest
 
-from swarmeval import (Diagnostic, RunContext, SimClock, SmellConfig, Task, analyze_runs, compute_coordination,
+from swarmeval import (Diagnostic, RunContext, RunSet, SimClock, SmellConfig, Task, analyze_runs, compute_coordination,
                        evaluate, load_smell_config, summarize_diagnostics)
 from swarmeval.diagnostics.smells import SMELLS, detect_smells, resolve_smell_config
 from swarmeval.examples.research_swarm import ResearchSwarm, build_benchmark, make_swarm
@@ -320,6 +321,17 @@ def test_engine_counts_each_run_once_and_orders_by_severity_then_prevalence():
     assert [s.runs_affected for s in as_list.smells] == [2, 1, 2]
     assert summarize_diagnostics({}).smells == [] and summarize_diagnostics([[]], n_runs=5).n_runs == 5
     json.dumps(rep.to_dict())
+
+
+def test_runs_sharing_a_run_id_are_all_counted():
+    ctx = make_ctx(difficulty="simple")
+    for a in ("a", "b", "c"):
+        with ctx.agent(a) as s:
+            llm(s)
+    traj = ctx.finish()
+    res = analyze_runs(RunSet("l", "b", [traj, copy.deepcopy(traj)]))       # e.g. merged run files
+    over = res.coordination.diagnostics.get("over_agentization")
+    assert over.runs_affected == 2 and over.prevalence == 1.0
 
 
 def test_engine_keeps_at_most_three_examples():

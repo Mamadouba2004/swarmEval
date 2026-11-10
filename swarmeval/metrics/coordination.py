@@ -23,7 +23,7 @@ from .efficiency import EfficiencyMetrics
 from .context import ContextMetrics, ContextSummary, compute_context, summarize_context
 from .dependency import DependencyMetrics, DependencySummary, compute_dependency, summarize_dependency
 from .redundancy import RedundancyMetrics, RedundancySummary, compute_redundancy, summarize_redundancy
-from ..diagnostics.engine import DiagnosticsReport, diagnostics_by_run, summarize_diagnostics
+from ..diagnostics.engine import DiagnosticsReport, summarize_diagnostics
 from ..diagnostics.smells import Diagnostic, detect_smells, resolve_smell_config
 from ..similarity import resolve_similarity
 
@@ -155,6 +155,6 @@ def summarize_coordination(per_run: Sequence[CoordinationMetrics]) -> Coordinati
         redundancy=summarize_redundancy(red) if red else None,
         dependency=summarize_dependency(dep) if dep else None,
         context=summarize_context(ctx) if ctx else None,
-        diagnostics=summarize_diagnostics(diagnostics_by_run(per_run), n_runs=len(per_run)),
+        diagnostics=summarize_diagnostics([list(cm.diagnostics or []) for cm in per_run]),
         # distinct smells per run: a smell seen twice in one run counts once, as in the prevalence table
         smells_per_run=summarize([len({d.smell for d in cm.diagnostics}) for cm in per_run]))
