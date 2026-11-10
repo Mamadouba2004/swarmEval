@@ -2,6 +2,7 @@
 import copy
 import json
 import re
+import sys
 from functools import partial
 
 import pytest
@@ -576,3 +577,25 @@ def test_contribution_row_keeps_long_agent_id():
     text = render_coordination(hub_run())
     section = text.split("OBSERVED CONTRIBUTION", 1)[1]
     assert any(l.startswith("  " + HUB + " ") for l in section.splitlines())
+
+
+def test_coordination_box_shows_failed_runs(monkeypatch):
+    ev = sys.modules["swarmeval.evaluate"]   # the package attribute is the evaluate() function
+    real, calls = ev.compute_coordination, []
+
+    def flaky(traj, **kw):
+        calls.append(traj.run_id)
+        if len(calls) % 2 == 0:
+            raise KeyError("odd trace " + "x" * 200)
+        return real(traj, **kw)
+
+    monkeypatch.setattr(ev, "compute_coordination", flaky)
+    traj = fan_out_trajectory(parallel=True)
+    runs = [copy.deepcopy(traj) for _ in range(4)]
+    for i, t in enumerate(runs):
+        t.run_id = f"r{i}"
+    res = analyze_runs(RunSet("l", "b", runs))
+    assert len(res.coordination_errors) == 2
+    box = render_coordination(res).split("OBSERVED CONTRIBUTION", 1)[0]
+    (line,) = [l for l in box.splitlines() if "Analysis Failed" in l]
+    assert "2/4 runs: KeyError: 'odd trace" in line and line.endswith("│")

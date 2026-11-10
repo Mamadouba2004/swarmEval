@@ -149,6 +149,11 @@ def render_coordination(result: Any) -> str:
     times = lambda x: f"{x:.2f}×"       # noqa: E731
     pct = lambda x: f"{x * 100:.1f}%"  # noqa: E731
     rows: List[Any] = [f"{cs.n_runs} runs  ·  values are means over runs (range)", None]
+    errors = result.coordination_errors
+    if errors:
+        failed = f"{len(errors)}/{len(result.runs)} runs: {next(iter(errors.values()))}"
+        rows += [("Analysis Failed", textwrap.shorten(failed, _LABEL_W + _VALUE_W - 30, placeholder="…"), "⚠"),
+                 None]
     if dep is not None:
         headroom = _ranged(dep.headroom_s, sec)
         if dep.headroom_ratio is not None:
