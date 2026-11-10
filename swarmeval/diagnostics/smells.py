@@ -423,10 +423,13 @@ def _late_and_premature(c: _Ctx) -> None:
             produced[a.producer].append(a.produced_at)
     finals = {c.traj.artifacts[a].producer for a in c.traj.output_artifacts if a in c.traj.artifacts}
     phase1 = g.schema_version is None
-    # (sender, receiver) -> when each message between them was sent
-    said: Dict[Tuple[str, str], List[float]] = defaultdict(list)
+    # (sender, receiver) -> when the sender asked for something or passed on something it produced
+    shared: Dict[Tuple[str, str], List[float]] = defaultdict(list)
+    by_id = {ev.message_id: ev for ev in c.traj.messages() if ev.message_id}
     for ev in c.traj.messages():
-        said[(ev.sender, ev.receiver)].append(ev.timestamp)
+        if ev.kind in REQUEST_KINDS or any(
+                x in c.traj.artifacts and c.traj.artifacts[x].producer == ev.sender for x in ev.input_artifacts):
+            shared[(ev.sender, ev.receiver)].append(ev.timestamp)
     for m in g.messages:
         r = m.receiver
         if not r or r == m.sender or not (m.kind in _CONTENT_KINDS or m.artifacts):
@@ -448,8 +451,10 @@ def _late_and_premature(c: _Ctx) -> None:
         after = [t for t in produced.get(r, []) if t >= got_at - EPS]
         if not before or after:
             continue
-        if any(min(before) - EPS <= t <= sent_at for t in said.get((r, m.sender), [])):
-            continue   # r wrote to the sender after producing, e.g. sent its draft for review: an answer
+        q = by_id.get(getattr(by_id.get(m.message_id), "reply_to", None))
+        if (q is not None and q.sender == r and q.timestamp >= min(before) - EPS) or any(
+                min(before) - EPS <= t <= sent_at for t in shared.get((r, m.sender), [])):
+            continue   # an answer to r's own output: r sent the sender its work, or m replies to r after it produced
         sev = "high" if r in finals else "medium"
         inferred = not m.received
         c.add("premature_synthesis", _cap(sev, "low") if inferred else sev, [r, m.sender or "-"],

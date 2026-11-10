@@ -315,6 +315,36 @@ def test_review_approval_with_default_kinds_is_not_premature_synthesis():
     assert not of(compute_coordination(ctx.finish()), "premature_synthesis")
 
 
+def test_unrelated_note_after_producing_does_not_excuse_premature_synthesis():
+    ctx = make_ctx()
+    with ctx.agent("writer") as w:
+        llm(w)
+        final = w.produce("draft", "the draft", derived_from=[])
+        w.send("reviewer", "fyi I'm offline after 5")                       # no draft, not asked for
+    with ctx.agent("reviewer") as r:
+        llm(r)
+        r.send("writer", "here are the 3 facts you were missing")
+    with ctx.agent("writer") as w:
+        w.receive()
+    ctx.set_output("the draft", artifacts=[final])
+    assert [d.severity for d in of(compute_coordination(ctx.finish()), "premature_synthesis")] == ["high"]
+
+
+def test_reply_to_a_review_request_sent_to_another_agent_is_not_premature_synthesis():
+    ctx = make_ctx()
+    with ctx.agent("writer") as w:
+        llm(w)
+        final = w.produce("draft", "the draft", derived_from=[])
+        ask = w.send("editor", "please review the draft", kind="request", artifacts=[final])
+    with ctx.agent("reviewer") as r:
+        llm(r)
+        r.send("writer", "approved", kind="feedback", reply_to=ask)
+    with ctx.agent("writer") as w:
+        w.receive()
+    ctx.set_output("the draft", artifacts=[final])
+    assert not of(compute_coordination(ctx.finish()), "premature_synthesis")
+
+
 def test_question_asked_before_producing_with_default_kinds_is_premature_synthesis():
     ctx = make_ctx()
     with ctx.agent("writer") as w:
