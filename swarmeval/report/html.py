@@ -429,6 +429,9 @@ def _phase1(result: Any) -> List[str]:
     if perf.trials > 1:
         perf_tiles.append(_tile("Per-trial Success", ", ".join(_pct(x) for x in perf.per_trial)))
     out = ["<h2>Performance</h2>", _tiles(perf_tiles)]
+    if result.runs.metadata.get("interrupted"):
+        planned = result.runs.metadata.get("planned_runs", n_runs)
+        out.append(f'<p class="note warn">⚠ interrupted after {n_runs}/{planned} runs</p>')
     complete = eff.cost_complete
     out += ["<h2>Efficiency</h2>", _tiles([
         _tile("Cost / Run", _money(result.cost["per_run"], complete)),

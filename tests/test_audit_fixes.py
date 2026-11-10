@@ -8,7 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from swarmeval import Benchmark, EvaluationResult, RunContext, SimClock, Task, evaluate, evaluators as E
+from swarmeval import (Benchmark, EvaluationResult, RunContext, SimClock, Task, compare, evaluate, evaluators as E,
+                       render_html)
 from swarmeval.cli import main
 from swarmeval.evaluate import analyze_runs
 from swarmeval.integrations.anthropic import instrument_client
@@ -76,6 +77,16 @@ def test_interrupted_header_and_per_trial_success_are_honest():
     assert "= 7 runs" not in header and "7/10 runs" in header
     assert res.performance.per_trial == [1.0]  # the partial trial is excluded
     assert "per-trial success: 100.0%  (incomplete trial excluded)" in report
+
+
+def test_interrupted_run_is_flagged_in_compare_and_html():
+    """PR #8 review: only the text report read the interrupt marker."""
+    partial = interrupted_in_second_trial()
+    full = evaluate(lambda t, c: "42", five_tasks(), trials=2, clock_factory=SimClock)
+    assert any("baseline" in w and "interrupted" in w for w in compare(partial, full).warnings)
+    assert any("candidate" in w and "interrupted" in w for w in compare(full, partial).warnings)
+    assert "interrupted after 7/10 runs" in render_html(partial)
+    assert "interrupted" not in render_html(full)
 
 
 # -- audit 2: a streamed call is not recorded as a $0 call -------------------- #

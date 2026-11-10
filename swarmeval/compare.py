@@ -232,6 +232,10 @@ def compare(baseline: Any, candidate: Any, pricing: Optional[PricingTable] = Non
     kw = dict(pricing=pricing, coordination=coordination, similarity=similarity, smell_config=smell_config)
     b = analyze_runs(_subset(base_runs, shared), **kw)
     c = analyze_runs(_subset(cand_runs, shared), **kw)
+    for side, rs in (("baseline", base_runs), ("candidate", cand_runs)):
+        if rs.metadata.get("interrupted"):
+            warnings.append(f"{side} was interrupted after {len(rs)}/{rs.metadata.get('planned_runs', len(rs))} "
+                            "runs; it is not a full run set")
     if b.performance.trials != c.performance.trials:
         warnings.append(f"different trial counts: {b.performance.trials} vs {c.performance.trials}")
     for side, r in (("baseline", b), ("candidate", c)):
