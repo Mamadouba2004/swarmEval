@@ -538,7 +538,7 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
             if not used:
                 # a later call may have used the content; for a message with
                 # artifacts, a call listing other inputs is recorded non-use
-                t0 = target.start
+                t0 = max(target.start, s.start)   # a receive stamped before its send cannot pull use earlier
                 used = any(x.kind in _CALL_KINDS and x.start >= t0 - EPS
                            and not (arts and b.ev[x.event_id].input_artifacts)
                            for x in by_agent.get(ev.receiver or "", []))
