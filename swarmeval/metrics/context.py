@@ -18,8 +18,9 @@ high ratio says "much of this prompt cannot be traced to recorded inputs",
 not "this context was useless".  ``basis`` says what the relevant figure rests
 on: ``"referenced"`` when the call had recorded inputs beyond the task,
 ``"task_only"`` when nothing was, ``"inferred"`` when message bodies were
-attributed by timing (Phase 1 data has no receive events: messages addressed
-to the agent and sent before the call are counted instead).
+attributed by timing (for a message with no receive event -- all of them on
+Phase 1 data, or one read with ``inbox()`` -- the call counts it if it was
+addressed to the agent and sent before the call).
 """
 from __future__ import annotations
 
@@ -81,12 +82,11 @@ def compute_context(traj: Trajectory) -> ContextMetrics:
         if ev.span_id:
             by_span[ev.span_id].append(ev)
     sent = {ev.message_id: ev for ev in traj.messages() if ev.message_id}
-    has_receives = bool(traj.events_of(EventType.MESSAGE_RECEIVE))
-    to_agent: Dict[str, List[Event]] = defaultdict(list)
-    if not has_receives:
-        for ev in traj.messages():
-            if ev.receiver:
-                to_agent[ev.receiver].append(ev)
+    received_ids = {ev.message_id for ev in traj.events_of(EventType.MESSAGE_RECEIVE)}
+    to_agent: Dict[str, List[Event]] = defaultdict(list)    # messages with no receive event
+    for ev in traj.messages():
+        if ev.receiver and not (ev.message_id and ev.message_id in received_ids):
+            to_agent[ev.receiver].append(ev)
     task_tokens = estimate_tokens(traj.task.input)
     arts = traj.artifacts
 
@@ -110,7 +110,7 @@ def compute_context(traj: Trajectory) -> ContextMetrics:
             elif et in (EventType.LLM_CALL.value, EventType.TOOL_CALL.value) and ev.end_timestamp <= t0 + EPS:
                 # earlier output of this span (a call still running when this one started is not)
                 prior_out += ev.output_tokens if et == EventType.LLM_CALL.value else ev.content_tokens
-        if not has_receives and call.agent_id:
+        if call.agent_id:
             msgs = [m for m in to_agent.get(call.agent_id, []) if m.timestamp <= t0 + EPS]
             if msgs:
                 msg_body += sum(body_tokens(m, traj) for m in msgs)

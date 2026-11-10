@@ -73,6 +73,22 @@ def test_received_messages_and_earlier_outputs_count_as_relevant():
     assert ctx_m.ratio == pytest.approx((100 + 1000) / (first.relevant + second.relevant))
 
 
+def test_messages_read_without_a_receive_are_attributed_by_timing():
+    ctx = make_ctx()
+    with ctx.agent("boss") as b:
+        b.send("w", "z" * 80, kind="request")           # body 20 tokens
+        b.send("v", "z" * 40, kind="request")           # body 10 tokens
+    with ctx.agent("w") as w:
+        w.receive()
+        call(w, 100)
+    with ctx.agent("v") as v:
+        v.inbox()                                       # read, but no receive event
+        call(v, 100)
+    by_agent = {c.agent_id: c for c in compute_context(ctx.finish()).calls}
+    assert by_agent["w"].parts["messages"] == 20 and by_agent["w"].basis == "referenced"
+    assert by_agent["v"].parts["messages"] == 10 and by_agent["v"].basis == "inferred"
+
+
 def test_system_tokens_are_counted_relevant():
     ctx = make_ctx()
     with ctx.agent("a") as a:
