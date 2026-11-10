@@ -13,8 +13,10 @@
 The ``anthropic`` package is only imported when a client is not supplied.
 Calls from threads that do not carry the span's context (a bare
 ``ThreadPoolExecutor``) cannot be attributed; use ``ctx.parallel``.
-Streaming (``stream=True``) is not instrumented yet: such calls pass through
-unrecorded, and an enclosing ``span.llm_call`` gets an unknown cost.
+A streamed call (``stream=True``) has no usage yet: inside an agent span it is
+recorded as one LLM call of unknown cost (its duration covers only opening the
+stream), and inside ``span.llm_call`` it makes that call's cost unknown.
+``client.messages.stream(...)`` is not wrapped: those calls are not recorded.
 """
 from __future__ import annotations
 
@@ -120,6 +122,11 @@ def _wrap(original: Callable[..., Any]) -> Callable[..., Any]:
     if _is_async(original):
         async def acreate(*args: Any, **kwargs: Any) -> Any:
             if kwargs.get("stream"):
+                span = _current_span.get()
+                if _current_llm_call.get() is None and span is not None:
+                    with span.llm_call(model=kwargs.get("model"), prompt=kwargs.get("messages")) as call:
+                        call.metadata["cost_unknown"] = True  # a stream has no usage yet
+                        return await original(*args, **kwargs)
                 _mark_streamed()
                 return await original(*args, **kwargs)
             active = _current_llm_call.get()
@@ -139,6 +146,11 @@ def _wrap(original: Callable[..., Any]) -> Callable[..., Any]:
 
     def create(*args: Any, **kwargs: Any) -> Any:
         if kwargs.get("stream"):
+            span = _current_span.get()
+            if _current_llm_call.get() is None and span is not None:
+                with span.llm_call(model=kwargs.get("model"), prompt=kwargs.get("messages")) as call:
+                    call.metadata["cost_unknown"] = True  # a stream has no usage yet
+                    return original(*args, **kwargs)
             _mark_streamed()
             return original(*args, **kwargs)
         active = _current_llm_call.get()

@@ -110,14 +110,29 @@ def started_ctx():
 
 
 @pytest.mark.parametrize("is_async", [False, True])
-def test_streamed_call_is_passed_through_unrecorded(is_async):
-    """The audit's fix: a stream has no usage yet, so recording it would
-    store 0 tokens at $0.00.  Pass it through and record nothing."""
+def test_bare_streamed_call_is_recorded_with_unknown_cost(is_async):
+    """PR #8 review round 2: passing a bare stream through unrecorded gave
+    llm_calls=0 and a complete $0.00 cost.  A stream has no usage yet, so it
+    is recorded as one call whose cost is unknown."""
     stream, client = streaming_client(is_async)
     ctx = started_ctx()
     with ctx.agent("a"):
         out = client.messages.create(model="claude-sonnet-5", messages=[], stream=True)
         out = asyncio.run(out) if is_async else out
+    assert out is stream
+    traj = ctx.finish()
+    (call,) = traj.llm_calls()
+    assert call.cost_usd is None
+    eff = compute_efficiency(traj)
+    assert eff.llm_calls == 1 and eff.cost_complete is False
+
+
+@pytest.mark.parametrize("is_async", [False, True])
+def test_streamed_call_outside_a_span_is_not_recorded(is_async):
+    stream, client = streaming_client(is_async)
+    ctx = started_ctx()
+    out = client.messages.create(model="claude-sonnet-5", messages=[], stream=True)
+    out = asyncio.run(out) if is_async else out
     assert out is stream
     assert ctx.finish().llm_calls() == []
 
