@@ -2,10 +2,11 @@
 derived_from, wait targets -- and that Phase 1 data still loads."""
 import json
 import os
+import threading
 
 import pytest
 
-from swarmeval import RunContext, SimClock, Task, Trajectory
+from swarmeval import RunContext, SimClock, Task, Trajectory, build_graph
 from swarmeval.evaluate import analyze_runs
 from swarmeval.runner import RunSet
 from swarmeval.schema import SCHEMA_VERSION, Artifact, EventType
@@ -36,6 +37,34 @@ def test_send_and_receive_share_message_id_and_receive_is_attributed_to_receiver
     assert recv_ev.content_tokens == 0 and recv_ev.kind == "result"
     assert recv_ev.metadata["delay_s"] == pytest.approx(2.0)
     assert traj.metadata["schema_version"] == SCHEMA_VERSION == 2
+
+
+def test_receive_in_a_parallel_branch_waits_for_the_send_under_simclock():
+    """Each ctx.parallel branch has its own SimClock time: a receive in a
+    branch still at t=0 of a message sent at t=5 is stamped at t=5, not before
+    the send (which would drop the message edge as pointing backwards)."""
+    ctx = make_ctx()
+    sent = threading.Event()
+
+    def sender():
+        with ctx.agent("a") as a:
+            ctx.clock.advance(5.0)
+            a.send("b", "done")
+        sent.set()
+
+    def receiver():
+        sent.wait(5)
+        with ctx.agent("b") as b:
+            (got,) = b.receive()
+            assert ctx.now() == pytest.approx(5.0)
+
+    ctx.parallel(sender, receiver)
+    traj = ctx.finish()
+    (recv_ev,) = traj.events_of(EventType.MESSAGE_RECEIVE)
+    assert recv_ev.timestamp == pytest.approx(5.0) and recv_ev.metadata["delay_s"] == 0.0
+    g = build_graph(traj)
+    assert g.dropped_edges == 0 and g.messages[0].received
+    assert g.coverage.message_receive_coverage == 1.0
 
 
 def test_reply_to_accepts_message_or_id_and_round_trips(tmp_path):
