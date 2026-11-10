@@ -93,6 +93,34 @@ def test_call_intent_verification_and_no_tools():
     assert r.tool_redundancy is None and r.artifact_redundancy is None
 
 
+def test_long_args_compared_in_full_with_capture_off():
+    """capture_text=False keeps a 120-char preview of the args; calls sharing a
+    long prefix are still distinct, and dict key order does not matter."""
+    prefix = "x" * 200
+    for traj in (lambda t: t, lambda t: Trajectory.from_dict(t.to_dict())):
+        ctx = make_ctx(capture_text=False)
+        with ctx.agent("a") as a:
+            search(ctx, a, prefix + "one")
+            a.call_tool("lookup", lambda **kw: 1, x=1, y=2)
+        with ctx.agent("b") as b:
+            search(ctx, b, prefix + "two")
+            b.call_tool("lookup", lambda **kw: 1, y=2, x=1)       # same args, other key order
+        r = compute_redundancy(traj(ctx.finish()))
+        assert r.duplicate_tool_calls == 1 and r.duplicate_groups[0]["tool"] == "lookup"
+        assert not r.tool_degraded
+
+
+def test_old_data_without_args_hash_is_degraded():
+    ctx = make_ctx(capture_text=False)
+    with ctx.agent("a") as a:
+        search(ctx, a, "q")
+    d = ctx.finish().to_dict()
+    for ev in d["events"]:
+        ev["metadata"].pop("args_hash", None)
+    r = compute_redundancy(Trajectory.from_dict(d))
+    assert r.tool_calls == 1 and r.tool_degraded
+
+
 def _artifacts(**ctx_kw):
     ctx = make_ctx(**ctx_kw)
     with ctx.agent("a") as a:

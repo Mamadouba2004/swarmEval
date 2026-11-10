@@ -15,6 +15,9 @@ Two separate numbers, never merged:
     accidental too, and is also counted in ``self_repeats``.
 
   Retries and verification are intentional and kept out of the ratio.
+  Arguments are compared by a hash of their full canonical form taken at
+  record time; ``tool_degraded`` is True when a call lacks that hash and its
+  stored arguments were truncated, so distinct calls may look the same.
 * **artifact redundancy** = accidentally redundant artifacts ÷ artifacts.  An
   artifact is redundant when an earlier artifact from a *different* producer
   has the same content hash or is similar (``similarity`` backend, default
@@ -28,52 +31,29 @@ record; the role / intent conventions are what tells them apart.
 """
 from __future__ import annotations
 
-import json
-import re
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from ..graph.builder import ExecutionGraph
-from ..schema import Event, EventType, Status, Trajectory, to_text
+from ..schema import Event, EventType, Status, Trajectory, canonical_args, content_hash, to_text
 from ..similarity import resolve_similarity, similar_pairs
 from ..stats import Summary, summarize
 
 VERIFICATION_ROLES = frozenset({"critic", "verifier", "reviewer", "validator", "judge"})
 DUPLICATE_CLASSES = ("accidental", "verification", "retry")
 MAX_EVIDENCE = 20
-_SPACE = re.compile(r"\s+")
 
 
 # --------------------------------------------------------------------------- #
 # Tool-call keys
 # --------------------------------------------------------------------------- #
-def _normalize(obj: Any) -> Any:
-    if isinstance(obj, str):
-        return _SPACE.sub(" ", obj).strip().lower()
-    if isinstance(obj, (bool, int, float)) or obj is None:
-        return obj
-    if isinstance(obj, dict):
-        return {str(k): _normalize(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_normalize(v) for v in obj]
-    if isinstance(obj, (set, frozenset)):
-        return sorted((_normalize(v) for v in obj), key=repr)
-    return obj
-
-
-def canonical_args(args: Any) -> str:
-    """Stable text form of tool arguments: ``{"query": "S1 "}`` and
-    ``{"query": "s1"}`` give the same key."""
-    norm = _normalize(args)
-    try:
-        return json.dumps(norm, sort_keys=True)
-    except (TypeError, ValueError):
-        return repr(norm)
-
-
 def tool_key(ev: Event) -> Tuple[str, str]:
-    return (ev.tool_name or "", canonical_args(ev.tool_args))
+    """``(tool, hash of the full canonical args)``.  The recorder stores the
+    hash as ``args_hash``; data without it hashes the stored args, which may
+    be truncated."""
+    h = ev.metadata.get("args_hash")
+    return (ev.tool_name or "", h if h is not None else content_hash(canonical_args(ev.tool_args)))
 
 
 def is_verification(traj: Trajectory, agent_id: Optional[str], span_id: Optional[str],
@@ -114,6 +94,7 @@ class RedundancyMetrics:
     artifact_redundancy: Optional[float] = None
     method: str = "hash"
     degraded: bool = False
+    tool_degraded: bool = False
     similarity_threshold: Optional[float] = None
     similarity_truncated: bool = False
     pairwise_overlap: List[Dict[str, Any]] = field(default_factory=list)
@@ -134,6 +115,9 @@ def _tool_redundancy(traj: Trajectory, out: RedundancyMetrics) -> None:
     groups: Dict[Tuple[str, str], List[Event]] = defaultdict(list)
     for ev in calls:
         groups[tool_key(ev)].append(ev)
+        if ev.metadata.get("args_hash") is None and (
+                traj.metadata.get("text_truncated") or str(ev.tool_args).endswith(("…", "…[truncated]"))):
+            out.tool_degraded = True
     keys_of: Dict[str, Set[Tuple[str, str]]] = defaultdict(set)
     counts: Counter = Counter()
     evidence: List[Dict[str, Any]] = []
@@ -160,7 +144,7 @@ def _tool_redundancy(traj: Trajectory, out: RedundancyMetrics) -> None:
             last_by_agent[ev.agent_id] = ev
             dups.append({"agent": ev.agent_id, "class": cls, "event_id": ev.event_id})
         if len(evidence) < MAX_EVIDENCE:
-            evidence.append({"tool": key[0], "args": key[1], "original_agent": evs[0].agent_id,
+            evidence.append({"tool": key[0], "args": evs[0].tool_args, "original_agent": evs[0].agent_id,
                              "original_event_id": evs[0].event_id, "duplicates": dups})
     out.duplicate_tool_calls = sum(counts.values())
     out.accidental_duplicates = counts["accidental"]

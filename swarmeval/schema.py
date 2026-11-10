@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import uuid
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
@@ -90,6 +91,33 @@ def estimate_tokens(obj: Any) -> int:
 
 def content_hash(obj: Any) -> str:
     return hashlib.sha1(to_text(obj).encode("utf-8")).hexdigest()
+
+
+_SPACE = re.compile(r"\s+")
+
+
+def _normalize(obj: Any) -> Any:
+    if isinstance(obj, str):
+        return _SPACE.sub(" ", obj).strip().lower()
+    if isinstance(obj, (bool, int, float)) or obj is None:
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): _normalize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_normalize(v) for v in obj]
+    if isinstance(obj, (set, frozenset)):
+        return sorted((_normalize(v) for v in obj), key=repr)
+    return obj
+
+
+def canonical_args(args: Any) -> str:
+    """Stable text form of tool arguments: ``{"query": "S1 "}`` and
+    ``{"query": "s1"}`` give the same key."""
+    norm = _normalize(args)
+    try:
+        return json.dumps(norm, sort_keys=True)
+    except (TypeError, ValueError):
+        return repr(norm)
 
 
 def preview(obj: Any, limit: int = 240) -> str:
