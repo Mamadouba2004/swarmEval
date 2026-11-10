@@ -71,7 +71,8 @@ class CommunicationMetrics:
     definitions).  ``by_category`` maps coordination / information /
     work_product / other to ``{"messages", "body_tokens"}``.
     ``repeated_messages`` counts extra copies of a (sender, receiver, content)
-    already sent; ``broadcasts`` counts one content sent from one span to two
+    already sent (messages without a content hash are never repeats or part
+    of a broadcast); ``broadcasts`` counts one content sent from one span to two
     or more receivers (``broadcast_messages`` the messages involved; messages
     sent outside any span are never grouped).
     ``used_edge_ratio`` = messages the receiver used ÷ messages, of which
@@ -135,11 +136,13 @@ def compute_communication(traj: Trajectory, graph: Optional[ExecutionGraph] = No
         cat = out.by_category[message_category(ev.kind)]
         cat["messages"] += 1
         cat["body_tokens"] += body
-        repeats[(ev.sender, ev.receiver, ev.content_hash)] += 1
-        if ev.receiver is not None and ev.span_id is not None:   # no span, nothing ties sends together
-            g = (ev.sender, ev.span_id, ev.content_hash)
-            fanout_groups[g].add(ev.receiver)
-            fanout_counts[g] += 1
+        # an unhashed (imported) message's content is unknown, so it repeats nothing
+        if ev.content_hash is not None:
+            repeats[(ev.sender, ev.receiver, ev.content_hash)] += 1
+            if ev.receiver is not None and ev.span_id is not None:   # no span, nothing ties sends together
+                g = (ev.sender, ev.span_id, ev.content_hash)
+                fanout_groups[g].add(ev.receiver)
+                fanout_counts[g] += 1
         # an agent messaging itself is involved once, not twice
         for a in {ev.sender, ev.receiver} - {None}:
             involvement[a] += 1

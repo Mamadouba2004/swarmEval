@@ -93,6 +93,20 @@ def test_same_text_sent_outside_spans_is_not_one_broadcast():
     assert cm.broadcasts == 0 and cm.broadcast_messages == 0
 
 
+def test_unhashed_messages_are_not_repeats():
+    """Imported events may lack content_hash; unknown content is not the same content."""
+    ctx = make_ctx()
+    with ctx.agent("lead") as lead:
+        lead.send("w1", "first")
+        lead.send("w1", "second")
+        lead.send("w2", "third")
+    traj = ctx.finish()
+    for ev in traj.messages():
+        ev.content_hash = None
+    cm = compute_communication(traj)
+    assert cm.repeated_messages == 0 and cm.broadcasts == 0
+
+
 def test_star_topology_hub_share_and_relay():
     """Every message goes through the hub; the hub forwards a's artifact."""
     ctx = make_ctx()
