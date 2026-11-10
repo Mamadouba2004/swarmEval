@@ -263,7 +263,8 @@ def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: Optional["Coordinatio
         n_inf = inferred.get((e.source, e.target, e.kind), 0)
         n_lost = undelivered.get((e.source, e.target), 0) if e.kind == "message" else 0
         width = min(6.0, 1.0 + 5.0 * e.tokens / max_tok)
-        tip = _edge_label(e.kind, e.count, e.tokens, n_inf)
+        # never-delivered messages are also delivery-inferred; count each once
+        tip = _edge_label(e.kind, e.count, e.tokens, n_inf - n_lost)
         tip = f"{e.source} → {e.target}: {tip}"
         if e.kind == "message":
             tip += f" · {e.used_count} used"

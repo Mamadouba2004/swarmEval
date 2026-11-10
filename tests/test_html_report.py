@@ -181,3 +181,21 @@ def test_timeline_tooltips_escape_recorded_strings():
     tips = [htmllib.unescape(t) for t in re.findall(r"<title>([^<]*)</title>", timeline)]
     for s in ("m", "t", "s", "k"):
         assert any(HOSTILE + s in t for t in tips), s
+
+
+def test_edge_tooltip_does_not_double_count_undelivered_messages():
+    def run(task, ctx):
+        with ctx.agent("worker") as w:
+            with w.llm_call(model="m", input_tokens=1, output_tokens=1):
+                ctx.clock.sleep(1.0)
+        with ctx.agent("boss") as b:
+            ctx.clock.sleep(1.0)
+            b.send("worker", "late 1")  # worker never runs again: neither message is delivered
+            b.send("worker", "late 2")
+        return "out"
+    res = evaluate(FunctionSwarm(run), Benchmark("b", [Task(task_id="t", input="q")]), trials=1,
+                   clock_factory=SimClock)
+    doc = render_html(res)
+    tip = htmllib.unescape(re.search(r'class="e message inf"[^>]*><title>([^<]*)</title>', doc).group(1))
+    assert "2 never delivered" in tip
+    assert "inferred" not in tip, tip
