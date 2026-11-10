@@ -314,6 +314,20 @@ def test_peeked_message_followed_by_work_is_not_late_information(kind):
     assert not of(compute_coordination(ctx.finish()), "late_information")
 
 
+def test_message_arriving_during_the_receivers_last_call_is_late_information():
+    # b's last call was already running when the message arrived and b did nothing after it
+    ctx = make_ctx()
+    with ctx.agent("b") as b:
+        llm(b)
+        with b.llm_call() as k:
+            ctx.clock.advance(5.0)
+            with ctx.agent("a") as a:
+                a.send("b", "use source X, not Y", kind="result")
+            ctx.clock.advance(5.0)
+            k.input_tokens, k.output_tokens = 10, 5
+    assert [d.severity for d in of(compute_coordination(ctx.finish()), "late_information")] == ["medium"]
+
+
 def asked_then_answered(produce_first, reply_to):
     """writer asks reviewer something, before or after producing the final draft; the answer comes last."""
     ctx = make_ctx()

@@ -441,8 +441,8 @@ def _late_and_premature(c: _Ctx) -> None:
         if m.receive_node is None:
             if not any(u.start < sent_at - EPS for u in by_agent.get(r, [])):
                 continue   # the receiver never ran before either: not a timing problem
-            if any(u.end > sent_at + EPS for u in by_agent.get(r, [])):
-                continue   # r still worked after the send (it may have peeked at its inbox)
+            if any(u.start >= sent_at - EPS for u in by_agent.get(r, [])):
+                continue   # r started work after the send (it may have peeked at its inbox)
             c.add("late_information", "low" if phase1 else "medium", [m.sender or "-", r],
                   f"A {m.kind} message from {m.sender} ({m.tokens} tokens) was sent to {r} at "
                   f"t={sent_at - (c.traj.started_at or 0.0):.1f}s, after {r}'s last recorded work.",
