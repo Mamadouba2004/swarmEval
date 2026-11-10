@@ -14,6 +14,7 @@ from swarmeval.cli import main
 from swarmeval.evaluate import analyze_runs
 from swarmeval.integrations.anthropic import instrument_client
 from swarmeval.metrics.efficiency import compute_efficiency
+from swarmeval.metrics.performance import compute_performance
 from swarmeval.pricing import PricingTable
 from swarmeval.report.text import box
 from swarmeval.schema import Evaluation
@@ -148,6 +149,17 @@ def test_interrupted_html_header_and_per_trial_tile_are_honest():
     page = render_html(interrupted_in_second_trial())
     assert "7/10 runs (interrupted)" in page and "5 tasks × 2 trials" not in page
     assert "100.0%  (incomplete trial excluded)" in page
+
+
+def test_uneven_trials_are_kept_unless_interrupted():
+    """PR #8 review round 2: a merged set whose trials differ in size (not an
+    interrupt) lost its short trial and was reported as incomplete."""
+    runs = evaluate(lambda t, c: "42", five_tasks(), trials=2, clock_factory=SimClock).runs
+    runs.trajectories = runs.trajectories[:-1]  # trial 2 has 4 of the 5 tasks
+    res = analyze_runs(runs)
+    assert res.performance.per_trial == [1.0, 1.0]
+    assert "incomplete trial excluded" not in res.report()
+    assert compute_performance(runs.trajectories, interrupted=True).per_trial == [1.0]
 
 
 # -- audit 2: a streamed call is not recorded as a $0 call -------------------- #

@@ -36,10 +36,12 @@ class PerformanceMetrics:
 
 
 def compute_performance(trajectories: Sequence[Trajectory],
-                        per_run: Optional[Sequence[Any]] = None) -> PerformanceMetrics:
+                        per_run: Optional[Sequence[Any]] = None, interrupted: bool = False) -> PerformanceMetrics:
     """Task performance over a set of runs.  ``per_run`` (the runs'
     ``EfficiencyMetrics``, same order) supplies per-task cost; without it the
-    cost recorded on each trajectory is used."""
+    cost recorded on each trajectory is used.  With ``interrupted`` a trial
+    with fewer runs than tasks (the one cut short) is left out of
+    ``per_trial``; otherwise uneven trials (e.g. a merged set) are all kept."""
     pm = PerformanceMetrics()
     pm.n_runs = len(trajectories)
     if not trajectories:
@@ -80,8 +82,8 @@ def compute_performance(trajectories: Sequence[Trajectory],
                             "cost_complete": all(ok for _, ok in task_costs[tid]),
                             "latency_s": mean([x.duration for x in ts]),
                             "category": ts[0].task.category, "difficulty": ts[0].task.difficulty}
-    # A trial cut short (interrupted run) is left out rather than shown as a full one.
+    # A trial cut short by an interrupt is left out rather than shown as a full one.
     pm.per_trial = [mean([1.0 if s else 0.0 for s in by_trial[i]]) for i in sorted(by_trial)
-                    if len(by_trial[i]) == pm.n_tasks]
+                    if not interrupted or len(by_trial[i]) == pm.n_tasks]
     pm.evaluators = sorted({t.evaluation.evaluator for t in trajectories if t.evaluation})
     return pm

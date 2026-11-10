@@ -240,7 +240,8 @@ def analyze_runs(runs: RunSet, pricing: Optional[PricingTable] = None, coordinat
     analysis fails is left out of the coordination summary with a warning;
     when two or more runs all fail with the same exception type, it is raised."""
     per_run = [compute_efficiency(t, pricing) for t in runs.trajectories]
-    performance = compute_performance(runs.trajectories, per_run)
+    performance = compute_performance(runs.trajectories, per_run,
+                                      interrupted=runs.metadata.get("interrupted", False))
     efficiency = summarize_efficiency(runs.trajectories, per_run)
     per_run_coord: Optional[List[Optional[CoordinationMetrics]]] = None
     coord_summary: Optional[CoordinationSummary] = None
