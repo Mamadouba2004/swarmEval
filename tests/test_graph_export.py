@@ -1,5 +1,8 @@
 """Graph export (graph/export.py), the `swarmeval graph` CLI, compare's coordination rows."""
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -185,3 +188,12 @@ def test_graph_uses_report_analysis_options(saved_demo, coordination_calls, tmp_
 def test_graph_no_coordination_skips_the_analysis(saved_demo, coordination_calls):
     main(["graph", saved_demo, "--no-coordination"])
     assert coordination_calls == []
+
+
+def test_graph_out_file_is_utf8_under_an_ascii_locale(saved_demo, tmp_path):
+    out = tmp_path / "f.mmd"
+    env = dict(os.environ, PYTHONUTF8="0", LC_ALL="C", LANG="C")   # LC_ALL also stops C-locale coercion
+    proc = subprocess.run([sys.executable, "-m", "swarmeval.cli", "graph", saved_demo, "--out", str(out)],
+                          env=env, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert "×" in out.read_text(encoding="utf-8") or "·" in out.read_text(encoding="utf-8")

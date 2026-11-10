@@ -197,7 +197,7 @@ def cmd_graph(args: argparse.Namespace) -> int:
                                   smell_config=kw["smell_config"])
     text = export_graph(graph, args.format, view=args.view, coordination=cm)
     if args.out:
-        with open(args.out, "w") as f:
+        with open(args.out, "w", encoding="utf-8") as f:
             f.write(text)
         print(f"wrote {args.format} ({args.view} view) of run {traj.run_id} to {args.out}")
     else:
