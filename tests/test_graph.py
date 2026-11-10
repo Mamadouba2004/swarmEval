@@ -234,7 +234,9 @@ def test_demo_graph_is_acyclic_fully_recorded_and_serialisable():
         assert is_acyclic(g) and g.dropped_edges == 0
         assert g.coverage.message_receive_coverage == 1.0 and g.coverage.derivation_coverage == 1.0
         assert not any(e.inferred for e in g.edges)
-        assert all(g.coverage.consumers_instrumented.values())
+        # researchers consume no artifact: derived_from=[] is no evidence they record use
+        instrumented = {a for a, v in g.coverage.consumers_instrumented.items() if v}
+        assert instrumented == {"coordinator", "critic", "synthesizer"}
         json.dumps(g.to_dict())
         # the coordinator relays everything: it talks to every other agent
         assert g.fan_out("coordinator") == 5 and g.fan_in("coordinator") == 4

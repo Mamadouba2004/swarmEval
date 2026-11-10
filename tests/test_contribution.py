@@ -100,6 +100,25 @@ def test_complete_instrumentation_and_no_use_is_dead():
     assert a.provenance_coverage == 1.0 and a.dead is True and cm.dead_agents == ["a"]
 
 
+def test_empty_derived_from_does_not_make_an_agent_instrumented():
+    """b reads a's message in an LLM call that lists no inputs; its only
+    provenance record is an artifact made "from nothing".  That says nothing
+    about what b's calls used, so a cannot be judged dead."""
+    ctx = make_ctx()
+    clock = ctx.clock
+    with ctx.agent("a") as a:
+        art = a.produce("notes", "facts")
+        a.send("b", "notes", artifacts=[art])
+    with ctx.agent("b") as b:
+        b.receive()
+        llm(b, clock, 1.0)
+        final = b.produce("final", "answer", derived_from=[])
+    ctx.set_output("answer", artifacts=[final])
+    cm = compute_coordination(ctx.finish())
+    assert cm.coverage.consumers_instrumented["b"] is False
+    assert cm.contribution["a"].provenance_coverage == 0.0 and cm.contribution["a"].dead is not True
+
+
 def test_consumption_and_lineage_fallback_without_derived_from():
     ctx = make_ctx()
     clock = ctx.clock

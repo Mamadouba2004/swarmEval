@@ -135,7 +135,7 @@ class Coverage:
     nothing to measure (no messages / no artifacts), never a silent 0 or 1.
     ``consumers_instrumented[a]`` is True when agent ``a`` records what it
     uses (an ARTIFACT_USE, an LLM/tool call with ``input_artifacts``, or an
-    artifact with ``derived_from``); without that, "a never used X" cannot be
+    artifact with a non-empty ``derived_from``); without that, "a never used X" cannot be
     told apart from "a's use of X was not recorded"."""
     messages: int = 0
     messages_received: int = 0
@@ -605,7 +605,7 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
         if u.kind == "use" or (u.kind in _CALL_KINDS and ev.input_artifacts):
             instrumented[u.agent_id] = True
     for art in traj.artifacts.values():
-        if art.derived_from is not None and art.producer is not None:
+        if art.derived_from and art.producer is not None:   # [] names no input: no evidence of recording use
             instrumented[art.producer] = True
     derived = sum(1 for a in traj.artifacts.values() if a.derived_from is not None)
     cov = Coverage(messages=len(links), messages_received=sum(1 for m in links if m.received),
