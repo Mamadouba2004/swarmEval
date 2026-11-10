@@ -153,3 +153,10 @@ def test_cli_run_checked_before_work_and_requires_html(tmp_path, capsys):
             main(cmd + ["--run", "1"])
         assert exc.value.code == 2
         assert "--run requires --html" in capsys.readouterr().err
+
+
+def test_trial_label_is_escaped():
+    res = _hostile_result()
+    res.runs.trajectories[0].trial = HOSTILE  # a hand-edited run file can carry any JSON value here
+    doc = render_html(res)
+    assert HOSTILE not in doc and "trial &lt;script&gt;" in doc

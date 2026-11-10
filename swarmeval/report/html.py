@@ -487,7 +487,7 @@ def _run_views(result: Any, run_index: int) -> List[str]:
     cm = per_run[run_index] if per_run is not None and run_index < len(per_run) else None
     graph = (cm.graph if cm is not None else None) or build_graph(traj)
     status = "succeeded" if traj.succeeded else "failed"
-    head = (f'<span class="badge">run {run_index}: task {_e(traj.task_id)} · trial {traj.trial} · '
+    head = (f'<span class="badge">run {run_index}: task {_e(traj.task_id)} · trial {_e(traj.trial)} · '
             f"{_e(status)}</span>")
     out: List[str] = []
     if cm is not None:
