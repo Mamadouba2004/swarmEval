@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import re
 import uuid
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
@@ -93,12 +92,9 @@ def content_hash(obj: Any) -> str:
     return hashlib.sha1(to_text(obj).encode("utf-8")).hexdigest()
 
 
-_SPACE = re.compile(r"\s+")
-
-
 def _normalize(obj: Any) -> Any:
     if isinstance(obj, str):
-        return _SPACE.sub(" ", obj).strip().lower()
+        return obj.strip()  # case and inner spacing matter in paths, ids and code
     if isinstance(obj, (bool, int, float)) or obj is None:
         return obj
     if isinstance(obj, dict):
@@ -111,8 +107,8 @@ def _normalize(obj: Any) -> Any:
 
 
 def canonical_args(args: Any) -> str:
-    """Stable text form of tool arguments: ``{"query": "S1 "}`` and
-    ``{"query": "s1"}`` give the same key."""
+    """Stable text form of tool arguments: ``{"query": " S1 "}`` and
+    ``{"query": "S1"}`` give the same key; ``{"query": "s1"}`` does not."""
     norm = _normalize(args)
     try:
         return json.dumps(norm, sort_keys=True)
