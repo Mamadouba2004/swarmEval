@@ -282,6 +282,25 @@ def test_wait_on_links_what_was_awaited():
     assert refs == {art.artifact_id, msg.message_id}
 
 
+def test_wait_on_an_agent_links_its_last_finished_unit():
+    ctx = make_ctx()
+    clock = ctx.clock
+
+    def tool(span, seconds):
+        with span.tool_call("search"):
+            clock.advance(seconds)
+
+    with ctx.agent("b") as b:
+        ctx.parallel(lambda: llm(b, clock, 9.0), lambda: tool(b, 1.0))
+    with ctx.agent("a") as a:
+        a.wait("results", 1.0, on="b")
+        llm(a, clock, 5.0)
+    g = build_graph(ctx.finish())
+    (e,) = [e for e in g.edges_of("wait") if e.ref == "b"]
+    src = g.unit(e.src)
+    assert (src.kind, src.end - src.start) == ("llm", 9.0)
+
+
 def test_demo_graph_is_acyclic_fully_recorded_and_serialisable():
     res = evaluate(make_swarm, build_benchmark(2), trials=1, clock_factory=SimClock)
     for cm in res.per_run_coordination:

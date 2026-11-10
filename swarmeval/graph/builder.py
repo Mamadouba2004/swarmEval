@@ -559,7 +559,8 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
                 continue
             done = [x for x in by_agent.get(agent, []) if x.end <= w.end + EPS and b.key(x) < b.key(w)]
             if done:
-                b.add_edge(done[-1], w, "wait", inferred=True, ref=agent)
+                # by_agent is start-ordered: the last to finish is what the wait ended on
+                b.add_edge(max(done, key=lambda x: (x.end, b.key(x))), w, "wait", inferred=True, ref=agent)
 
     # agent graph ----------------------------------------------------------------
     agents = traj.agent_ids()
