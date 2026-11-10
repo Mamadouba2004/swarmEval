@@ -431,6 +431,9 @@ class RunContext:
         if span is not None and span.agent_id != agent_id:
             span = None  # another agent's span is active: the read is not part of it
         for m in msgs:
+            if isinstance(self.clock, SimClock) and self.clock.now() < m.timestamp:
+                # each parallel branch has its own simulated time: a read cannot precede the send
+                self.clock.set(m.timestamp)
             now = self.now()
             # delay is clamped: with threads and a wall clock the read can be
             # stamped marginally before the send

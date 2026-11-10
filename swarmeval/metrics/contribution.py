@@ -183,17 +183,23 @@ class ObservedContribution:
         return asdict(self)
 
 
-def _provenance_coverage(traj: Trajectory, graph: ExecutionGraph, agent: str, own: List[str]) -> Optional[float]:
-    """Share of the agent's outputs (artifacts, and messages carrying
-    artifacts) whose possible consumers record what they use.  An artifact
-    sent in messages can be used by those messages' receivers; one never
-    sent, by any other agent active after it was produced."""
-    instrumented = graph.coverage.consumers_instrumented
+def _artifact_receivers(graph: ExecutionGraph) -> Dict[str, Set[str]]:
+    """artifact id -> agents it was sent to in a message."""
     receivers: Dict[str, Set[str]] = defaultdict(set)
     for m in graph.messages:
         for a in m.artifacts:
             if m.receiver is not None:
                 receivers[a].add(m.receiver)
+    return receivers
+
+
+def _provenance_coverage(traj: Trajectory, graph: ExecutionGraph, agent: str, own: List[str],
+                         receivers: Dict[str, Set[str]]) -> Optional[float]:
+    """Share of the agent's outputs (artifacts, and messages carrying
+    artifacts) whose possible consumers record what they use.  An artifact
+    sent in messages can be used by those messages' receivers; one never
+    sent, by any other agent active after it was produced."""
+    instrumented = graph.coverage.consumers_instrumented
     checks: List[bool] = []
     for a in own:
         art = traj.artifacts[a]
@@ -220,6 +226,7 @@ def compute_contribution(traj: Trajectory, graph: Optional[ExecutionGraph] = Non
     in_lineage = set(lineage.artifacts)
     inferred = set(lineage.inferred)
     final_producers = {traj.artifacts[a].producer for a in traj.output_artifacts if a in traj.artifacts}
+    receivers = _artifact_receivers(graph)
 
     out: Dict[str, ObservedContribution] = {}
     for aid in graph.agents:
@@ -241,7 +248,7 @@ def compute_contribution(traj: Trajectory, graph: Optional[ExecutionGraph] = Non
             status = "unused"
         else:
             status = "unknown"
-        coverage = _provenance_coverage(traj, graph, aid, own)
+        coverage = _provenance_coverage(traj, graph, aid, own, receivers)
         dead: Optional[bool]
         if aid in final_producers or consumed or used_msgs:
             dead = False

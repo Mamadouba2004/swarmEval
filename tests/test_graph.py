@@ -5,6 +5,7 @@ from collections import defaultdict
 
 from swarmeval import RunContext, SimClock, Task, build_graph, evaluate
 from swarmeval.examples.research_swarm import build_benchmark, make_swarm
+from swarmeval.metrics import compute_contribution
 from swarmeval.schema import EventType
 
 
@@ -148,6 +149,7 @@ def test_recorded_receive_gives_a_real_message_edge():
 
 def test_without_receive_the_message_edge_is_inferred_to_the_first_unit_after_the_send():
     traj = _send_receive(record_receive=False)
+    del traj.metadata["schema_version"]         # Phase 1 data: receives were never recorded
     g = build_graph(traj)
     (e,) = g.edges_of("message")
     first_b = next(u for u in g.units if u.agent_id == "b" and u.kind == "llm")
@@ -155,6 +157,16 @@ def test_without_receive_the_message_edge_is_inferred_to_the_first_unit_after_th
     assert g.coverage.message_receive_coverage == 0.0
     edge = next(x for x in g.agent_edges if x.kind == "message")
     assert (edge.source, edge.target, edge.count, edge.inferred_count) == ("a", "b", 1, 1)
+
+
+def test_schema_v2_message_without_receive_is_not_inferred_as_delivered():
+    """v2 records every receive, so a message without one never arrived."""
+    traj = _send_receive(record_receive=False)
+    g = build_graph(traj)
+    assert not g.edges_of("message")
+    (link,) = g.messages
+    assert link.receive_node is None and not link.received and not link.used
+    assert compute_contribution(traj, g)["a"].status == "unused"
 
 
 def test_forwarding_an_artifact_is_not_consuming_it():
@@ -180,7 +192,8 @@ def test_forwarding_an_artifact_is_not_consuming_it():
     assert ("a", "b", "artifact") in kinds and ("a", "hub", "artifact") not in kinds
     a_to_hub = next(m for m in g.messages if m.sender == "a")
     hub_to_b = next(m for m in g.messages if m.sender == "hub")
-    assert not a_to_hub.used and hub_to_b.used
+    assert a_to_hub.used_inferred                  # hub's call may have read the text, not the notes
+    assert hub_to_b.used and not hub_to_b.used_inferred
 
 
 def test_invocation_edges_link_parent_frontier_child_and_resume():
@@ -222,7 +235,9 @@ def test_demo_graph_is_acyclic_fully_recorded_and_serialisable():
         assert is_acyclic(g) and g.dropped_edges == 0
         assert g.coverage.message_receive_coverage == 1.0 and g.coverage.derivation_coverage == 1.0
         assert not any(e.inferred for e in g.edges)
-        assert all(g.coverage.consumers_instrumented.values())
+        # researchers consume no artifact: derived_from=[] is no evidence they record use
+        instrumented = {a for a, v in g.coverage.consumers_instrumented.items() if v}
+        assert instrumented == {"coordinator", "critic", "synthesizer"}
         json.dumps(g.to_dict())
         # the coordinator relays everything: it talks to every other agent
         assert g.fan_out("coordinator") == 5 and g.fan_in("coordinator") == 4

@@ -103,11 +103,13 @@ class AgentEdge:
 @dataclass
 class MessageLink:
     """What became of one message.  ``receive_node`` is the recorded receive
-    or, without one, the receiver's first unit after the send (``received``
-    False); ``None`` means it never reached the receiver.  A message carrying
-    artifacts is ``used`` when the receiver consumed one of them; one without
-    artifacts counts as used when the receiver did any LLM/tool work after
-    receiving it -- a timing heuristic, flagged ``used_inferred``."""
+    or, for Phase 1 data without one, the receiver's first unit after the send
+    (``received`` False); ``None`` means it never reached the receiver.  A
+    message is ``used`` when the receiver consumed one of its artifacts or,
+    failing that, did LLM/tool work after receiving it -- a timing heuristic,
+    flagged ``used_inferred``.  For a message carrying artifacts only calls
+    that record no ``input_artifacts`` count: one listing other inputs shows
+    the artifacts were not used."""
     send_node: str
     receive_node: Optional[str]
     message_id: Optional[str]
@@ -136,7 +138,7 @@ class Coverage:
     nothing to measure (no messages / no artifacts), never a silent 0 or 1.
     ``consumers_instrumented[a]`` is True when agent ``a`` records what it
     uses (an ARTIFACT_USE, an LLM/tool call with ``input_artifacts``, or an
-    artifact with ``derived_from``); without that, "a never used X" cannot be
+    artifact with a non-empty ``derived_from``); without that, "a never used X" cannot be
     told apart from "a's use of X was not recorded"."""
     messages: int = 0
     messages_received: int = 0
@@ -453,7 +455,8 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
        frontier at the child's start, and the parent's next units on the
        child's last units;
     4. *message*: send -> recorded receive (matched by message id); without
-       one, send -> the receiver's first unit after the send (``inferred``);
+       one, in Phase 1 data only, send -> the receiver's first unit after the
+       send (``inferred``);
     5. *artifact*: produce -> genuine consumption only (ARTIFACT_USE, an
        LLM/tool call's ``input_artifacts``, another artifact's
        ``derived_from``); carrying an artifact in a message is not using it;
@@ -512,8 +515,9 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
         target: Optional[WorkUnit] = None
         if rcv is not None and b.add_edge(s, rcv, "message", ref=ev.message_id):
             target = rcv
-        else:
-            rcv = None
+        elif b.version is None:
+            # Phase 1 data has no receive events: infer delivery from timing.
+            # Schema v2 records every receive, so without one it never arrived.
             cands = by_agent.get(ev.receiver or "", [])
             i = bisect_left(starts.get(ev.receiver or "", []), s.start - EPS)
             for cand in cands[i:]:
@@ -522,18 +526,21 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
                     break
             if target is not None:
                 b.add_edge(s, target, "message", inferred=True, ref=ev.message_id)
+        received = target is not None and target is rcv
         arts = list(ev.input_artifacts)
         used, used_inferred = False, False
         if target is not None:
-            if arts:
-                used = any(t >= s.start - EPS for a in arts for t in used_by.get((a, ev.receiver), []))
-            else:
+            used = any(t >= s.start - EPS for a in arts for t in used_by.get((a, ev.receiver), []))
+            if not used:
+                # a later call may have used the content; for a message with
+                # artifacts, a call listing other inputs is recorded non-use
                 t0 = target.start
                 used = any(x.kind in _CALL_KINDS and x.start >= t0 - EPS
+                           and not (arts and b.ev[x.event_id].input_artifacts)
                            for x in by_agent.get(ev.receiver or "", []))
                 used_inferred = used
         links.append(MessageLink(s.node_id, target.node_id if target else None, ev.message_id, ev.sender,
-                                 ev.receiver, ev.kind, ev.content_tokens, arts, rcv is not None, used,
+                                 ev.receiver, ev.kind, ev.content_tokens, arts, received, used,
                                  used_inferred))
 
     # waits (rule 6) -------------------------------------------------------------
@@ -607,7 +614,7 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
         if u.kind == "use" or (u.kind in _CALL_KINDS and ev.input_artifacts):
             instrumented[u.agent_id] = True
     for art in traj.artifacts.values():
-        if art.derived_from is not None and art.producer is not None:
+        if art.derived_from and art.producer is not None:   # [] names no input: no evidence of recording use
             instrumented[art.producer] = True
     derived = sum(1 for a in traj.artifacts.values() if a.derived_from is not None)
     cov = Coverage(messages=len(links), messages_received=sum(1 for m in links if m.received),
