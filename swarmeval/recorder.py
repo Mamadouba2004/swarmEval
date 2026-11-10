@@ -409,7 +409,11 @@ class RunContext:
         # the receive event can be matched to it.
         msg_id = new_id("msg")
         span = _span if _span is not None else _current_span.get()
+        if span is not None and span.agent_id != sender:
+            span = None  # another agent's span is active: the send is not part of it
+        # an explicit parent stops record() falling back to the active span
         ev = self.record(EventType.MESSAGE, _span=span, agent_id=sender, span_id=span.span_id if span else None,
+                         parent_event_id=span.start_event_id if span else None,
                          sender=sender, receiver=receiver, kind=kind, content=self._text(content),
                          content_tokens=tokens, content_hash=content_hash(content),
                          input_artifacts=art_ids, metadata=dict(metadata), message_id=msg_id, reply_to=reply_id)
@@ -438,7 +442,8 @@ class RunContext:
             # delay is clamped: with threads and a wall clock the read can be
             # stamped marginally before the send
             self.record(EventType.MESSAGE_RECEIVE, _span=span, agent_id=agent_id,
-                        span_id=span.span_id if span else None, sender=m.sender, receiver=agent_id,
+                        span_id=span.span_id if span else None,
+                        parent_event_id=span.start_event_id if span else None, sender=m.sender, receiver=agent_id,
                         kind=m.kind, content_tokens=0, input_artifacts=list(m.artifacts),
                         message_id=m.message_id, reply_to=m.reply_to, timestamp=now,
                         metadata={"delay_s": max(0.0, now - m.timestamp)})

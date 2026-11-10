@@ -104,7 +104,9 @@ class AgentEdge:
 class MessageLink:
     """What became of one message.  ``receive_node`` is the recorded receive
     or, for Phase 1 data without one, the receiver's first unit after the send
-    (``received`` False); ``None`` means it never reached the receiver.  A
+    (``received`` False); ``None`` means it never reached the receiver.
+    ``received`` is True whenever a receive was recorded, even when its DAG
+    edge was dropped because the receive is stamped before the send.  A
     message is ``used`` when the receiver consumed one of its artifacts or,
     failing that, did LLM/tool work after receiving it -- a timing heuristic,
     flagged ``used_inferred``.  For a message carrying artifacts only calls
@@ -513,8 +515,10 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
         ev = b.ev[s.event_id]
         rcv = receive_of.get(ev.message_id) if ev.message_id else None
         target: Optional[WorkUnit] = None
-        if rcv is not None and b.add_edge(s, rcv, "message", ref=ev.message_id):
+        if rcv is not None:
+            # a recorded receive means it arrived, even if the edge is dropped as out of order
             target = rcv
+            b.add_edge(s, rcv, "message", ref=ev.message_id)
         elif b.version is None:
             # Phase 1 data has no receive events: infer delivery from timing.
             # Schema v2 records every receive, so without one it never arrived.
