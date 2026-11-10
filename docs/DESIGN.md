@@ -92,7 +92,7 @@ ESLint for agent architectures. Each smell is a *hypothesis from trajectory evid
 | Over-agentization | many agents for a simple task; many low-contribution agents |
 | Under-specialization | "specialised" agents doing overlapping work |
 | Coordinator bottleneck | most messages pass through one agent; high token share; on the critical path; no bypass |
-| Premature synthesis / late information | an agent reasons before its inputs exist, or receives them after its last call (an answer it asked for only after producing, such as a review approval, is not an input it skipped) |
+| Premature synthesis / late information | an agent reasons before its inputs exist, or receives them after its last call (a message from an agent it wrote to after producing, such as a review approval, is not an input it skipped) |
 | Context bloat | input tokens far exceed relevant tokens |
 | Dead / zero-value agent | output never used downstream and absent from the final output's lineage |
 | Serialized execution | large gap between potential and actual parallelism |

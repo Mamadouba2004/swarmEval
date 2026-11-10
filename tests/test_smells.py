@@ -232,6 +232,54 @@ def test_answer_to_a_request_sent_after_producing_is_not_premature_synthesis(rep
     assert len(pre) == 1 and pre[0].severity == "high"
 
 
+def test_review_approval_with_default_kinds_is_not_premature_synthesis():
+    ctx = make_ctx()
+    with ctx.agent("writer") as w:
+        llm(w)
+        final = w.produce("draft", "the draft", derived_from=[])
+        w.send("reviewer", "final draft attached", artifacts=[final])       # default kind, no request
+    with ctx.agent("reviewer") as r:
+        r.receive()
+        llm(r)
+        r.send("writer", "approved, no changes")                           # default kind, no reply_to
+    with ctx.agent("writer") as w:
+        w.receive()
+    ctx.set_output("the draft", artifacts=[final])
+    assert not of(compute_coordination(ctx.finish()), "premature_synthesis")
+
+
+def test_question_asked_before_producing_with_default_kinds_is_premature_synthesis():
+    ctx = make_ctx()
+    with ctx.agent("writer") as w:
+        w.send("reviewer", "what should the draft cover?")
+        llm(w)
+        final = w.produce("draft", "the draft", derived_from=[])
+    with ctx.agent("reviewer") as r:
+        r.receive()
+        llm(r)
+        r.send("writer", "cover the risks too")
+    with ctx.agent("writer") as w:
+        w.receive()
+    ctx.set_output("the draft", artifacts=[final])
+    pre = of(compute_coordination(ctx.finish()), "premature_synthesis")
+    assert len(pre) == 1 and pre[0].severity == "high"
+
+
+def test_unsolicited_late_information_is_premature_synthesis():
+    ctx = make_ctx()
+    with ctx.agent("writer") as w:
+        llm(w)
+        final = w.produce("draft", "the draft", derived_from=[])
+    with ctx.agent("researcher") as r:
+        llm(r)
+        r.send("writer", "an important late finding")                     # default kind, unasked
+    with ctx.agent("writer") as w:
+        w.receive()
+    ctx.set_output("the draft", artifacts=[final])
+    pre = of(compute_coordination(ctx.finish()), "premature_synthesis")
+    assert len(pre) == 1 and pre[0].agents == ["writer", "researcher"] and pre[0].severity == "high"
+
+
 def test_communication_overhead():
     ctx = make_ctx()
     with ctx.agent("a") as a:
