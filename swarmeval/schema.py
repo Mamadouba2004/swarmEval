@@ -562,12 +562,15 @@ class Trajectory:
         if (not TextPolicy.from_metadata(metadata).capture
                 or any(isinstance(t, str) and t.endswith("…[truncated]") for t in texts)):
             metadata["text_truncated"] = True
+        trial = d.get("trial", 0)
+        if not isinstance(trial, int) or isinstance(trial, bool):
+            raise ValueError(f"run {d['run_id']!r}: trial must be an integer, got {trial!r}")
         return cls(
             run_id=d["run_id"],
             task_id=d["task_id"],
             task=Task.from_dict(d["task"]),
             seed=d.get("seed", 0),
-            trial=d.get("trial", 0),
+            trial=trial,
             events=[Event.from_dict(e) for e in d.get("events", [])],
             artifacts={k: Artifact.from_dict(a) for k, a in d.get("artifacts", {}).items()},
             spans={k: Span.from_dict(s) for k, s in d.get("spans", {}).items()},

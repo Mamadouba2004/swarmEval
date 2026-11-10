@@ -1,5 +1,6 @@
 """Standalone HTML report: content, escaping, self-containment, CLI."""
 import html as htmllib
+import json
 import re
 
 import pytest
@@ -160,6 +161,27 @@ def test_trial_label_is_escaped():
     res.runs.trajectories[0].trial = HOSTILE  # a hand-edited run file can carry any JSON value here
     doc = render_html(res)
     assert HOSTILE not in doc and "trial &lt;script&gt;" in doc
+
+
+def hostile_trial_file(tmp_path):
+    d = json.loads(open(FIXTURE).read())
+    d["trajectories"][0]["trial"] = HOSTILE        # a hand-edited run file
+    p = tmp_path / "hostile.json"
+    p.write_text(json.dumps(d))
+    return str(p), d["trajectories"][0]["run_id"]
+
+
+def test_non_integer_trial_is_rejected_on_load(tmp_path):
+    path, run_id = hostile_trial_file(tmp_path)
+    with pytest.raises(ValueError, match=re.escape(f"run {run_id!r}: trial must be an integer")):
+        load_runset(path)
+
+
+def test_cli_report_rejects_non_integer_trial_cleanly(tmp_path):
+    path, run_id = hostile_trial_file(tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        main(["report", path, "--html", str(tmp_path / "r.html")])
+    assert str(exc.value.code).startswith(f"swarmeval: run {run_id!r}: trial must be an integer")
 
 
 def test_timeline_tooltips_escape_recorded_strings():
