@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .evaluate import EvaluationResult, analyze_runs
+from .metrics.coordination import ANALYSES
 from .pricing import PricingTable
 from .runner import RunSet
 
@@ -40,19 +41,11 @@ METRICS: list[tuple[str, str, bool | None, str]] = [
     ("wall_clock_s", "Wall Clock / Run", False, "s"),
     ("agent_time_s", "Agent Time / Run", False, "s"),
     ("errors_per_run", "Errors / Run", False, "num"),
-    ("critical_path_s", "Critical Path / Run", False, "s"),
-    ("actual_parallelism", "Actual Parallelism", True, "num"),
-    ("potential_parallelism", "Potential Parallelism", None, "num"),
-    ("comm_work_ratio", "Communication / Work", None, "num"),
-    ("tool_redundancy", "Redundant Tool Calls", False, "pct"),
-    ("artifact_redundancy", "Redundant Artifacts", False, "pct"),
-    ("context_bloat", "Context Bloat", False, "num"),
+    *(m[:4] for a in ANALYSES for m in a.metrics),
     ("dead_agents_per_run", "Dead Agents / Run", False, "num"),
     ("smells_per_run", "Smells / Run", False, "num"),
 ]
-COORDINATION_KEYS = ("critical_path_s", "actual_parallelism", "potential_parallelism", "comm_work_ratio",
-                     "tool_redundancy", "artifact_redundancy", "context_bloat", "dead_agents_per_run",
-                     "smells_per_run")
+COORDINATION_KEYS = (*(m[0] for a in ANALYSES for m in a.metrics), "dead_agents_per_run", "smells_per_run")
 
 TOLERANCE = 0.005
 
@@ -67,15 +60,13 @@ def _coordination_values(r: EvaluationResult) -> dict[str, float | None]:
     cs = r.coordination
     if cs is None:
         return {k: None for k in COORDINATION_KEYS}
-    dep, comm, red, ctx = cs.dependency, cs.communication, cs.redundancy, cs.context
+    out: dict[str, float | None] = {}
+    for a in ANALYSES:
+        s = cs.get(a.name)
+        for key, *_, summary_field in a.metrics:
+            out[key] = _mean(getattr(s, summary_field)) if s is not None else None
     return {
-        "critical_path_s": _mean(dep.critical_path_s) if dep else None,
-        "actual_parallelism": _mean(dep.actual_parallelism) if dep else None,
-        "potential_parallelism": _mean(dep.potential_parallelism) if dep else None,
-        "comm_work_ratio": _mean(comm.comm_work_ratio) if comm else None,
-        "tool_redundancy": _mean(red.tool_redundancy) if red else None,
-        "artifact_redundancy": _mean(red.artifact_redundancy) if red else None,
-        "context_bloat": _mean(ctx.ratio) if ctx else None,
+        **out,
         "dead_agents_per_run": _mean(cs.dead_agents_per_run),
         "smells_per_run": _mean(cs.smells_per_run),
     }

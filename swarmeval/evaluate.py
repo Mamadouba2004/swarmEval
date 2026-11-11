@@ -41,7 +41,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .diagnostics.smells import resolve_smell_config
-from .metrics.coordination import CoordinationMetrics, CoordinationSummary, compute_coordination, summarize_coordination
+from .metrics.coordination import (
+    ANALYSES,
+    CoordinationAnalysis,
+    CoordinationMetrics,
+    CoordinationSummary,
+    compute_coordination,
+    summarize_coordination,
+)
 from .metrics.efficiency import EfficiencyMetrics, compute_efficiency
 from .metrics.performance import PerformanceMetrics, compute_performance
 from .pricing import PricingTable
@@ -265,7 +272,8 @@ def load_runset(path: str) -> RunSet:
 
 
 def analyze_runs(runs: RunSet, pricing: PricingTable | None = None, coordination: bool = True,
-                 similarity: Any = None, smell_config: Any = None) -> EvaluationResult:
+                 similarity: Any = None, smell_config: Any = None,
+                 analyses: Sequence[CoordinationAnalysis] = ANALYSES) -> EvaluationResult:
     """Recompute the evaluation from trajectories, re-pricing every LLM call when ``pricing`` is given;
     coordination failures are handled as described in the module overview."""
     per_run = [compute_efficiency(t, pricing) for t in runs.trajectories]
@@ -284,7 +292,7 @@ def analyze_runs(runs: RunSet, pricing: PricingTable | None = None, coordination
         for t, e in zip(runs.trajectories, per_run, strict=True):
             try:
                 cm: CoordinationMetrics | None = compute_coordination(
-                    t, similarity=similarity, smell_config=smell_config, efficiency=e)
+                    t, similarity=similarity, smell_config=smell_config, efficiency=e, analyses=analyses)
             except Exception as exc:
                 cm = None
                 errors[t.run_id] = f"{type(exc).__name__}: {exc}"
@@ -298,7 +306,7 @@ def analyze_runs(runs: RunSet, pricing: PricingTable | None = None, coordination
                 raise first_exc
             warnings.warn(f"coordination analysis failed on {len(per_run_coord) - len(done)}/{len(per_run_coord)} "
                           f"runs: {type(first_exc).__name__}: {first_exc}", stacklevel=2)
-        coord_summary = summarize_coordination(done) if done else None
+        coord_summary = summarize_coordination(done, analyses) if done else None
     return EvaluationResult(runs, per_run, performance, efficiency, per_run_coordination=per_run_coord,
                             coordination=coord_summary, coordination_errors=errors)
 

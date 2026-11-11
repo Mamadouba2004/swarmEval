@@ -46,12 +46,17 @@ from typing import Any
 
 from ..graph.builder import EPS, ExecutionGraph, build_graph
 from ..schema import MessageKind, Trajectory
-from ..stats import Summary, known_summary, summarize, summary_dict
+from ..stats import Summary, known_summary, ranged, summarize, summary_dict
 from .efficiency import EfficiencyMetrics, union_length
 
 _CALL_KINDS = ("llm", "tool")
 REQUEST_KINDS = frozenset({MessageKind.TASK_ASSIGNMENT.value, MessageKind.REQUEST.value,
                            MessageKind.COORDINATION.value})
+DEPENDENCY_METRICS = (
+    ("critical_path_s", "Critical Path / Run", False, "s", "critical_path_s"),
+    ("actual_parallelism", "Actual Parallelism", True, "num", "actual_parallelism"),
+    ("potential_parallelism", "Potential Parallelism", None, "num", "potential_parallelism"),
+)
 ANSWER_KINDS = frozenset({MessageKind.RESULT.value, MessageKind.FEEDBACK.value})
 
 
@@ -317,3 +322,20 @@ def summarize_dependency(per_run: Sequence[DependencyMetrics]) -> DependencySumm
         depth=summarize([r.depth for r in per_run]),
         runs_with_cycles=sum(1 for r in per_run if r.cycles), isolated_agents=dict(iso),
         critical_path_share={a: sum(v) / n_cp for a, v in share.items()} if n_cp else {})
+
+
+def dependency_rows(dep: DependencySummary) -> list[tuple[str, str] | None]:
+    """The dependency rows of the COORDINATION box, ending with a group separator."""
+    sec = lambda x: f"{x:.1f}s"         # noqa: E731
+    times = lambda x: f"{x:.2f}×"       # noqa: E731
+    headroom = ranged(dep.headroom_s, sec)
+    if dep.headroom_ratio is not None:
+        headroom += f"  {dep.headroom_ratio.mean:.2f}×"
+    return [
+        ("Critical Path / Run", ranged(dep.critical_path_s, sec)),
+        ("Actual Parallelism (work ÷ wall)", ranged(dep.actual_parallelism, times)),
+        ("Potential Parallelism (work ÷ critical path)", ranged(dep.potential_parallelism, times)),
+        ("Parallel Headroom (wall − critical path)", headroom),
+        ("Unrecorded Time (nothing running)", ranged(dep.unrecorded_s, sec)),
+        None,
+    ]

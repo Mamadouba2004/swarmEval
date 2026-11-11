@@ -49,11 +49,15 @@ from typing import Any
 from ..graph.builder import ExecutionGraph
 from ..schema import Event, EventType, Status, Trajectory, canonical_args, content_hash, to_text
 from ..similarity import resolve_similarity, similar_pairs
-from ..stats import Summary, known_summary, summarize, summary_dict
+from ..stats import Summary, known_summary, ranged, summarize, summary_dict
 
 VERIFICATION_ROLES = frozenset({"critic", "verifier", "reviewer", "validator", "judge"})
 DUPLICATE_CLASSES = ("accidental", "verification", "retry")
 MAX_EVIDENCE = 20
+REDUNDANCY_METRICS = (
+    ("tool_redundancy", "Redundant Tool Calls", False, "pct", "tool_redundancy"),
+    ("artifact_redundancy", "Redundant Artifacts", False, "pct", "artifact_redundancy"),
+)
 
 
 def tool_key(ev: Event) -> tuple[str, str]:
@@ -289,3 +293,13 @@ def summarize_redundancy(per_run: Sequence[RedundancyMetrics]) -> RedundancySumm
         methods=dict(Counter(r.method for r in per_run if r.artifacts)),
         degraded_runs=sum(1 for r in per_run if r.degraded),
         similarity_truncated_runs=sum(1 for r in per_run if r.similarity_truncated))
+
+
+def redundancy_rows(red: RedundancySummary) -> list[tuple[str, str] | None]:
+    """The redundancy rows of the COORDINATION box."""
+    pct = lambda x: f"{x * 100:.1f}%"  # noqa: E731
+    method = ", ".join(sorted(red.methods)) or "none"
+    if red.degraded_runs:
+        method += ", hash only in " + str(red.degraded_runs)
+    return [("Redundant Tool Calls (accidental ÷ calls)", ranged(red.tool_redundancy, pct)),
+            (f"Redundant Artifacts ({method})", ranged(red.artifact_redundancy, pct))]

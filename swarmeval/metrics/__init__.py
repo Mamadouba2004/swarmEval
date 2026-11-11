@@ -16,7 +16,15 @@ from .contribution import (
     final_lineage,
     summarize_contribution,
 )
-from .coordination import CoordinationMetrics, CoordinationSummary, compute_coordination, summarize_coordination
+from .coordination import (
+    ANALYSES,
+    AnalysisInput,
+    CoordinationAnalysis,
+    CoordinationMetrics,
+    CoordinationSummary,
+    compute_coordination,
+    summarize_coordination,
+)
 from .dependency import CriticalPath, DependencyMetrics, DependencySummary, compute_dependency, summarize_dependency
 from .efficiency import AgentEfficiency, EfficiencyMetrics, compute_efficiency
 from .performance import PerformanceMetrics, compute_performance
@@ -28,6 +36,7 @@ __all__ = [
     "AgentUtilization", "Lineage", "ObservedContribution", "compute_utilization", "compute_contribution",
     "final_lineage", "summarize_contribution",
     "CoordinationMetrics", "CoordinationSummary", "compute_coordination", "summarize_coordination",
+    "CoordinationAnalysis", "AnalysisInput", "ANALYSES",
     "AgentCommunication", "CommunicationMetrics", "CommunicationSummary", "compute_communication",
     "summarize_communication",
     "RedundancyMetrics", "RedundancySummary", "canonical_args", "compute_redundancy", "summarize_redundancy",

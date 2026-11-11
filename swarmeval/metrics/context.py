@@ -39,8 +39,10 @@ from typing import Any
 
 from ..graph.builder import EPS
 from ..schema import Event, EventType, Trajectory, estimate_tokens
-from ..stats import Summary, summarize, summary_dict
+from ..stats import Summary, ranged, summarize, summary_dict
 from .communication import body_tokens
+
+CONTEXT_METRICS = (("context_bloat", "Context Bloat", False, "num", "ratio"),)
 
 
 @dataclass
@@ -175,3 +177,13 @@ def summarize_context(per_run: Sequence[ContextMetrics]) -> ContextSummary:
                           excess=summarize([r.excess for r in per_run]),
                           worst_ratio=summarize([w.ratio for w in worst]) if worst else None,
                           worst_agents=dict(agents), bases=dict(bases))
+
+
+def context_rows(ctx: ContextSummary) -> list[tuple[str, str] | None]:
+    """The context-bloat rows of the COORDINATION box."""
+    rows: list[tuple[str, str] | None] = [
+        ("Context Bloat (received ÷ relevant tokens)", ranged(ctx.ratio, lambda x: f"{x:.1f}×"))]
+    if ctx.worst_ratio is not None and ctx.worst_agents:
+        top = max(ctx.worst_agents.items(), key=lambda kv: (kv[1], kv[0]))[0]
+        rows.append(("  Worst Call / Run (most frequent agent)", f"{ctx.worst_ratio.mean:.1f}× ({top})"))
+    return rows

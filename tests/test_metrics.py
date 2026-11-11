@@ -122,3 +122,25 @@ def test_analyze_runs_summary_and_cost_per_success():
     assert s["runs"] == 2 and s["label"] == "lbl" and s["tasks"] == 2
     text = res.report()
     assert "SWARM EVALUATION" in text and "synthesizer" in text and "t2" in text
+
+
+def test_extra_analysis_reaches_json():
+    from swarmeval import ANALYSES, CoordinationAnalysis
+    toy = CoordinationAnalysis("toy", lambda i: len(i.traj.events), lambda rs: {"runs": len(rs), "events": sum(rs)},
+                               (), lambda s: [])
+    trajs = [_traj("t1", 0, True, 1.0), _traj("t2", 0, False, 0.0)]
+    res = analyze_runs(RunSet("lbl", "bench", trajs), analyses=(*ANALYSES, toy))
+    n_events = len(trajs[0].events)
+    first = res.per_run_coordination[0]
+    assert [cm.extra for cm in res.per_run_coordination] == [{"toy": n_events}] * 2
+    assert first.get("toy") == n_events and first.get("dependency") is first.dependency
+    assert first.to_dict()["extra"] == {"toy": n_events}
+    assert res.coordination.get("toy") == {"runs": 2, "events": 2 * n_events}
+    assert res.to_dict()["coordination"]["extra"] == {"toy": {"runs": 2, "events": 2 * n_events}}
+
+
+def test_default_to_dict_has_no_extra():
+    res = analyze_runs(RunSet("lbl", "bench", [_traj("t1", 0, True, 1.0)]))
+    assert res.coordination.extra == {} and res.per_run_coordination[0].extra == {}
+    assert "extra" not in res.to_dict()["coordination"]
+    assert "extra" not in res.per_run_coordination[0].to_dict()

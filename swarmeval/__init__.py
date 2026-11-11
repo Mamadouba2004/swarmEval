@@ -31,8 +31,11 @@ from .evaluate import AnalysisFailed, EfficiencySummary, EvaluationResult, analy
 from .export import read_events_jsonl, write_events_jsonl
 from .graph import ExecutionGraph, build_graph, export_graph, to_dot, to_json, to_mermaid
 from .metrics import (
+                      ANALYSES,
+                      AnalysisInput,
                       CommunicationMetrics,
                       ContextMetrics,
+                      CoordinationAnalysis,
                       CoordinationMetrics,
                       CoordinationSummary,
                       DependencyMetrics,
@@ -63,6 +66,7 @@ __all__ = [
     "Swarm", "SwarmContext", "FunctionSwarm", "SwarmRunner", "RunInterrupted", "RunOptions", "RunSet",
     "PerformanceMetrics", "EfficiencyMetrics", "compute_performance", "compute_efficiency",
     "CoordinationMetrics", "CoordinationSummary", "compute_coordination", "summarize_coordination",
+    "CoordinationAnalysis", "AnalysisInput", "ANALYSES",
     "CommunicationMetrics", "compute_communication", "RedundancyMetrics", "compute_redundancy",
     "Similarity", "LexicalSimilarity", "EmbeddingSimilarity", "resolve_similarity",
     "DependencyMetrics", "compute_dependency", "ContextMetrics", "compute_context",

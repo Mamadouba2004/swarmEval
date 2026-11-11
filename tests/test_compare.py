@@ -104,3 +104,13 @@ def test_cli_compare(tmp_path, capsys):
     assert "COMPARISON  base → cand" in capsys.readouterr().out
     d = json.loads(out.read_text())
     assert d["summary"]["lost"] == 9 and "success_rate" in d["summary"]["regressed"]
+
+
+def test_compare_metrics_follow_registry():
+    from swarmeval import ANALYSES
+    from swarmeval.compare import COORDINATION_KEYS, METRICS
+    registry = [m[:4] for a in ANALYSES for m in a.metrics]
+    coordination = [m for m in METRICS if m[0] in COORDINATION_KEYS]
+    assert coordination[:len(registry)] == registry
+    assert [m[0] for m in coordination[len(registry):]] == ["dead_agents_per_run", "smells_per_run"]
+    assert list(COORDINATION_KEYS) == [m[0] for m in coordination]

@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import textwrap
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
+from ..metrics.coordination import ANALYSES
 from ..schema import EventType, Trajectory, preview
 from ..stats import Summary
+from ..stats import ranged as _ranged
 
 
 def bar(frac: float, width: int = 16) -> str:
@@ -152,17 +154,6 @@ CONTRIBUTION_NOTES = (
 )
 
 
-def _ranged(s: Summary | None, fmt: Callable[[float], str]) -> str:
-    """Mean over runs, with the range when runs differ; ``unknown`` when no
-    run defined the value."""
-    if s is None or s.n == 0:
-        return "unknown"
-    out = fmt(s.mean)
-    if s.n > 1 and fmt(s.minimum) != fmt(s.maximum):
-        out += f" ({fmt(s.minimum)}–{fmt(s.maximum)})"
-    return out
-
-
 def _row(label: str, value: str) -> str:
     """One fixed-width label and value row."""
     return f"{label:<{_LABEL_W}}{value:>{_VALUE_W}}"
@@ -176,41 +167,12 @@ def _wrap(prefix: str, text: str, indent: int, width: int = 104) -> list[str]:
 def coordination_rows(cs: Any) -> list[tuple[str, str] | None]:
     """``(label, value)`` rows of the COORDINATION box, ``None`` between groups, each label carrying its
     definition; the text and HTML reports both render them."""
-    dep, comm, red, ctx = cs.dependency, cs.communication, cs.redundancy, cs.context
-    sec = lambda x: f"{x:.1f}s"         # noqa: E731
-    times = lambda x: f"{x:.2f}×"       # noqa: E731
     pct = lambda x: f"{x * 100:.1f}%"  # noqa: E731
     rows: list[tuple[str, str] | None] = []
-    if dep is not None:
-        headroom = _ranged(dep.headroom_s, sec)
-        if dep.headroom_ratio is not None:
-            headroom += f"  {dep.headroom_ratio.mean:.2f}×"
-        rows += [
-            ("Critical Path / Run", _ranged(dep.critical_path_s, sec)),
-            ("Actual Parallelism (work ÷ wall)", _ranged(dep.actual_parallelism, times)),
-            ("Potential Parallelism (work ÷ critical path)", _ranged(dep.potential_parallelism, times)),
-            ("Parallel Headroom (wall − critical path)", headroom),
-            ("Unrecorded Time (nothing running)", _ranged(dep.unrecorded_s, sec)),
-            None,
-        ]
-    if comm is not None:
-        hub = _ranged(comm.hub_share, lambda x: f"{x * 100:.0f}%")
-        if comm.hub_agents:
-            top = max(comm.hub_agents.items(), key=lambda kv: (kv[1], kv[0]))[0]
-            hub += f" ({top})"
-        rows += [("Communication / Work (message ÷ LLM tokens)", _ranged(comm.comm_work_ratio, lambda x: f"{x:.3f}")),
-                 ("Hub Share (agent)", hub)]
-    if red is not None:
-        method = ", ".join(sorted(red.methods)) or "none"
-        if red.degraded_runs:
-            method += ", hash only in " + str(red.degraded_runs)
-        rows += [("Redundant Tool Calls (accidental ÷ calls)", _ranged(red.tool_redundancy, pct)),
-                 (f"Redundant Artifacts ({method})", _ranged(red.artifact_redundancy, pct))]
-    if ctx is not None:
-        rows.append(("Context Bloat (received ÷ relevant tokens)", _ranged(ctx.ratio, lambda x: f"{x:.1f}×")))
-        if ctx.worst_ratio is not None and ctx.worst_agents:
-            top = max(ctx.worst_agents.items(), key=lambda kv: (kv[1], kv[0]))[0]
-            rows.append(("  Worst Call / Run (most frequent agent)", f"{ctx.worst_ratio.mean:.1f}× ({top})"))
+    for a in ANALYSES:
+        summary = cs.get(a.name)
+        if summary is not None:
+            rows += a.rows(summary)
     rows += [None,
              ("Dependency Coverage (receive events)", _ranged(cs.message_receive_coverage, pct)),
              ("Derivation Coverage (derived_from)", _ranged(cs.derivation_coverage, pct))]

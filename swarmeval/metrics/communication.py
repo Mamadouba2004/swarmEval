@@ -43,7 +43,7 @@ from typing import Any
 
 from ..graph.builder import ExecutionGraph, build_graph
 from ..schema import EventType, MessageKind, Trajectory
-from ..stats import Summary, known_summary, mean, summarize, summary_dict
+from ..stats import Summary, known_summary, mean, ranged, summarize, summary_dict
 
 CATEGORIES: dict[str, str] = {
     MessageKind.TASK_ASSIGNMENT.value: "coordination",
@@ -53,6 +53,7 @@ CATEGORIES: dict[str, str] = {
     MessageKind.RESULT.value: "work_product",
     MessageKind.FEEDBACK.value: "work_product",
 }
+COMMUNICATION_METRICS = (("comm_work_ratio", "Communication / Work", None, "num", "comm_work_ratio"),)
 CATEGORY_NAMES = ("coordination", "information", "work_product", "other")
 
 
@@ -232,3 +233,13 @@ def summarize_communication(per_run: Sequence[CommunicationMetrics]) -> Communic
         receive_delay_mean_s=known_summary([r.receive_delay_mean_s for r in per_run]),
         by_category=by_cat, hub_agents=dict(Counter(r.hub_agent for r in per_run if r.hub_agent)),
         per_agent=per_agent)
+
+
+def communication_rows(comm: CommunicationSummary) -> list[tuple[str, str] | None]:
+    """The communication rows of the COORDINATION box."""
+    hub = ranged(comm.hub_share, lambda x: f"{x * 100:.0f}%")
+    if comm.hub_agents:
+        top = max(comm.hub_agents.items(), key=lambda kv: (kv[1], kv[0]))[0]
+        hub += f" ({top})"
+    return [("Communication / Work (message ÷ LLM tokens)", ranged(comm.comm_work_ratio, lambda x: f"{x:.3f}")),
+            ("Hub Share (agent)", hub)]

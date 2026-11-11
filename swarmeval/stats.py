@@ -9,7 +9,7 @@ Classes:
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -71,3 +71,14 @@ def known_summary(values: Sequence[float | None]) -> Summary | None:
 def summary_dict(obj: Any) -> dict[str, Any]:
     """The attributes of ``obj`` as a dict, with each Summary turned into its dict."""
     return {k: (v.to_dict() if isinstance(v, Summary) else v) for k, v in obj.__dict__.items()}
+
+
+def ranged(s: Summary | None, fmt: Callable[[float], str]) -> str:
+    """Mean over runs, with the range when runs differ; ``unknown`` when no
+    run defined the value."""
+    if s is None or s.n == 0:
+        return "unknown"
+    out = fmt(s.mean)
+    if s.n > 1 and fmt(s.minimum) != fmt(s.maximum):
+        out += f" ({fmt(s.minimum)}–{fmt(s.maximum)})"
+    return out
