@@ -32,15 +32,25 @@ therefore does not fire.
 Premature synthesis is not flagged for an answer to the receiver's own output: after producing, the receiver
 sent that agent its work or a request, or the late message replies to one of the receiver's later messages.
 
+Custom smells: ``register_smell(name, detector, smells=None)`` adds ``detector(ctx)`` to the detectors run by
+``detect_smells``, after those already registered, and appends the smells it emits (default ``(name,)``) to
+``SMELLS``; registering a name again replaces its detector.  The detector receives a ``SmellContext`` with
+``traj`` (the Trajectory), ``cm`` (its CoordinationMetrics), ``cfg`` (the SmellConfig), ``graph`` (the execution
+graph or None), ``agents`` (agent ids in first-start order), ``roles`` (agent id to role), ``receive_cov`` and
+``recorded`` (whether message receipts were fully recorded), ``order(agents)`` and
+``add(smell, severity, agents, observation, hypothesis, intervention, evidence, inferred=False)``, which records a
+Diagnostic for the run.
+
 Classes:
 - Diagnostic: One smell observed in one run (see the module docstring).
 - SmellConfig: Detection thresholds (initial guesses; see the module docstring).
+- SmellContext: What a registered detector receives (see the module docstring).
 """
 from __future__ import annotations
 
 import json
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, fields
 from typing import TYPE_CHECKING, Any
 
@@ -55,9 +65,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 SEVERITIES = ("low", "medium", "high")
 SEVERITY_RANK = {s: i for i, s in enumerate(SEVERITIES)}
-SMELLS = ("redundant_delegation", "agent_ping_pong", "over_agentization", "under_specialization",
-          "coordinator_bottleneck", "late_information", "premature_synthesis", "context_bloat", "dead_agent",
-          "serialized_execution", "communication_overhead")
+SMELLS: list[str] = []
 _CONTENT_KINDS = frozenset({MessageKind.RESULT.value, MessageKind.FEEDBACK.value, MessageKind.INFORMATION.value})
 
 
@@ -172,7 +180,7 @@ def _is_checker(traj: Trajectory, agent: str, roles: dict[str, str | None]) -> b
     return (roles.get(agent) or "").lower() in VERIFICATION_ROLES or is_verification(traj, agent, None)
 
 
-class _Ctx:
+class SmellContext:
     def __init__(self, traj: Trajectory, cm: CoordinationMetrics, cfg: SmellConfig) -> None:
         self.traj, self.cm, self.cfg = traj, cm, cfg
         self.graph = cm.graph
@@ -195,7 +203,7 @@ class _Ctx:
                                    intervention, evidence, inferred))
 
 
-def _redundant_delegation(c: _Ctx) -> None:
+def _redundant_delegation(c: SmellContext) -> None:
     """Flag similar requests reaching one agent from several senders, or delegated work repeated."""
     traj, cfg = c.traj, c.cfg
     seq = {ev.event_id: i for i, ev in enumerate(traj.events)}
@@ -269,7 +277,7 @@ def _redundant_delegation(c: _Ctx) -> None:
                "assignment_similarity": best_sim})
 
 
-def _ping_pong(c: _Ctx) -> None:
+def _ping_pong(c: SmellContext) -> None:
     """Flag pairs whose longest back-and-forth exchange changes direction often enough;
     how an exchange starts, continues and restarts is described in the module overview."""
     cfg, arts = c.cfg, c.traj.artifacts
@@ -317,7 +325,7 @@ def _ping_pong(c: _Ctx) -> None:
               {"pair": [a, b], "messages": len(senders), "alternations": alternations})
 
 
-def _over_agentization(c: _Ctx) -> None:
+def _over_agentization(c: SmellContext) -> None:
     """Flag many low-contribution agents, or too many agents for a simple task."""
     cfg, cm = c.cfg, c.cm
     agents = [a for a in c.agents if a in c.roles]
@@ -351,7 +359,7 @@ def _over_agentization(c: _Ctx) -> None:
            "difficulty": c.traj.task.difficulty}, inferred)
 
 
-def _under_specialization(c: _Ctx) -> None:
+def _under_specialization(c: SmellContext) -> None:
     """Flag agent pairs with overlapping tools and similar outputs."""
     red = c.cm.redundancy
     if red is None:
@@ -389,7 +397,7 @@ def _under_specialization(c: _Ctx) -> None:
                   {"role": role, "tool_jaccard": jac, "similar_artifacts": len(arts)})
 
 
-def _bottleneck(c: _Ctx) -> None:
+def _bottleneck(c: SmellContext) -> None:
     """Flag a hub agent that most messages pass through, worse when it relays or sits on the critical path."""
     cfg, comm, dep = c.cfg, c.cm.communication, c.cm.dependency
     if comm is None or comm.hub_agent is None or comm.hub_share is None or comm.hub_share < cfg.hub_share:
@@ -426,7 +434,7 @@ def _bottleneck(c: _Ctx) -> None:
            "critical_path_share": cp_share}, inferred)
 
 
-def _late_and_premature(c: _Ctx) -> None:
+def _late_and_premature(c: SmellContext) -> None:
     """Flag agents that act before their inputs exist or receive inputs after their last call."""
     g = c.graph
     if g is None:
@@ -485,7 +493,7 @@ def _late_and_premature(c: _Ctx) -> None:
                "final_producer": r in finals}, inferred)
 
 
-def _context_bloat(c: _Ctx) -> None:
+def _context_bloat(c: SmellContext) -> None:
     """Flag agents whose LLM calls receive far more tokens than are relevant."""
     ctx, cfg = c.cm.context, c.cfg
     if ctx is None:
@@ -516,7 +524,7 @@ def _context_bloat(c: _Ctx) -> None:
                "basis": sorted(bases)}, inferred)
 
 
-def _dead_agents(c: _Ctx) -> None:
+def _dead_agents(c: SmellContext) -> None:
     """Flag agents whose outputs were never used, when provenance is complete enough to tell."""
     for a in c.agents:
         oc = c.cm.contribution.get(a)
@@ -540,7 +548,7 @@ def _dead_agents(c: _Ctx) -> None:
                "provenance_coverage": oc.provenance_coverage})
 
 
-def _serialized(c: _Ctx) -> None:
+def _serialized(c: SmellContext) -> None:
     """Flag runs whose busy wall time far exceeds the critical path."""
     dep, cfg = c.cm.dependency, c.cfg
     if dep is None or dep.critical_path_s <= EPS or dep.wall_s <= EPS:
@@ -567,7 +575,7 @@ def _serialized(c: _Ctx) -> None:
            "unrecorded_s": dep.unrecorded_s, "message_receive_coverage": c.receive_cov}, inferred or weak)
 
 
-def _comm_overhead(c: _Ctx) -> None:
+def _comm_overhead(c: SmellContext) -> None:
     """Flag runs whose message bodies are large relative to LLM tokens."""
     comm, cfg = c.cm.communication, c.cfg
     if comm is None or comm.comm_work_ratio is None or comm.messages < cfg.comm_min_messages:
@@ -589,15 +597,33 @@ def _comm_overhead(c: _Ctx) -> None:
            "by_category": comm.by_category})
 
 
-_DETECTORS = (_redundant_delegation, _ping_pong, _over_agentization, _under_specialization, _bottleneck,
-              _late_and_premature, _context_bloat, _dead_agents, _serialized, _comm_overhead)
+_REGISTRY: dict[str, Callable[[SmellContext], None]] = {}
+
+
+def register_smell(name: str, detector: Callable[[SmellContext], None], smells: tuple[str, ...] | None = None) -> None:
+    """Run ``detector`` in ``detect_smells`` under ``name`` (replacing one already registered there), and append the
+    smells it emits (default ``(name,)``) to ``SMELLS``."""
+    _REGISTRY[name] = detector
+    SMELLS.extend(s for s in dict.fromkeys(smells or (name,)) if s not in SMELLS)
+
+
+register_smell("redundant_delegation", _redundant_delegation)
+register_smell("agent_ping_pong", _ping_pong)
+register_smell("over_agentization", _over_agentization)
+register_smell("under_specialization", _under_specialization)
+register_smell("coordinator_bottleneck", _bottleneck)
+register_smell("late_and_premature", _late_and_premature, smells=("late_information", "premature_synthesis"))
+register_smell("context_bloat", _context_bloat)
+register_smell("dead_agent", _dead_agents)
+register_smell("serialized_execution", _serialized)
+register_smell("communication_overhead", _comm_overhead)
 
 
 def detect_smells(traj: Trajectory, metrics: CoordinationMetrics,
                   config: SmellConfig | None = None) -> list[Diagnostic]:
     """All smells found in one run, in ``SMELLS`` order then by severity."""
-    c = _Ctx(traj, metrics, resolve_smell_config(config))
-    for detect in _DETECTORS:
+    c = SmellContext(traj, metrics, resolve_smell_config(config))
+    for detect in _REGISTRY.values():
         detect(c)
     order = {s: i for i, s in enumerate(SMELLS)}
     return sorted(c.out, key=lambda d: (order.get(d.smell, len(order)), -SEVERITY_RANK[d.severity]))

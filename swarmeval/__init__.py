@@ -20,9 +20,11 @@ from .diagnostics import (
                       Diagnostic,
                       DiagnosticsReport,
                       SmellConfig,
+                      SmellContext,
                       SmellPrevalence,
                       detect_smells,
                       load_smell_config,
+                      register_smell,
                       summarize_diagnostics,
 )
 from .evaluate import AnalysisFailed, EfficiencySummary, EvaluationResult, analyze_runs, evaluate
@@ -64,8 +66,8 @@ __all__ = [
     "CommunicationMetrics", "compute_communication", "RedundancyMetrics", "compute_redundancy",
     "Similarity", "LexicalSimilarity", "EmbeddingSimilarity", "resolve_similarity",
     "DependencyMetrics", "compute_dependency", "ContextMetrics", "compute_context",
-    "Diagnostic", "DiagnosticsReport", "SmellConfig", "SmellPrevalence", "detect_smells", "load_smell_config",
-    "summarize_diagnostics",
+    "Diagnostic", "DiagnosticsReport", "SmellConfig", "SmellContext", "SmellPrevalence", "detect_smells",
+    "load_smell_config", "register_smell", "summarize_diagnostics",
     "ExecutionGraph", "build_graph", "export_graph", "to_mermaid", "to_dot", "to_json",
     "read_events_jsonl", "write_events_jsonl", "render_text", "render_trajectory", "render_comparison",
     "render_coordination", "render_html",

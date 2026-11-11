@@ -175,6 +175,20 @@ Everything below is computed from the recorded trajectory alone and is observati
 
 On the demo swarm the report flags `context_bloat` (synthesizer and coordinator), `under_specialization` and `redundant_delegation` (researchers a and c share a scope), `coordinator_bottleneck` and `dead_agent` (researcher_c), the problems built into it.
 
+**Adding a custom smell** (Python API only; the CLI does not load plugins): write a detector that takes a `SmellContext` and calls `ctx.add(...)` for each diagnostic, then register it before analysing runs. It runs after the built-in detectors and its smell names are appended to `SMELLS`; registering the same name again replaces the detector. A detector that emits several smells passes them as `smells=(...)`. The `swarmeval.diagnostics.smells` module docstring lists what a `SmellContext` holds.
+
+```python
+from swarmeval import SmellContext, register_smell
+
+def too_many_agents(ctx: SmellContext) -> None:
+    if len(ctx.agents) > 5:
+        ctx.add("too_many_agents", "low", ctx.agents, f"{len(ctx.agents)} agents took part.",
+                "A swarm this large may be spending more on coordination than it gains.",
+                "Re-run with fewer agents and compare success and cost.", {"agents": len(ctx.agents)})
+
+register_smell("too_many_agents", too_many_agents)
+```
+
 **Graph export**: `swarmeval graph runs.json [--run N] [--view agents|dag] [--format mermaid|dot|json] [--out FILE]` writes one run's agent graph (token share per agent, dead agents dashed red, timing-inferred edges dashed, edges labelled `kind ×count · tokens`) or work-unit DAG (grouped by agent, critical path highlighted). Mermaid renders on GitHub and mermaid.live; DOT with `dot -Tsvg`. In Python: `to_mermaid(cm.graph, view="agents", coordination=cm)`, `to_dot`, `to_json`.
 
 **HTML report**: `swarmeval demo --html report.html` or `swarmeval report runs.json --html report.html [--run N]` (Python: `render_html(result, path="report.html", run_index=0)`) writes one self-contained page (no scripts, no external resources, light and dark): health dimensions side by side (no overall score), coordination tiles, an SVG agent graph and timeline of run N with the critical path highlighted, the observed-contribution table and the diagnostics.

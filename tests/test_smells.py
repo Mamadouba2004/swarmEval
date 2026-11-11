@@ -489,6 +489,46 @@ def test_detect_smells_runs_on_precomputed_metrics(demo):
     assert all(d.smell in SMELLS for d in again)
 
 
+@pytest.fixture
+def smell_registry():
+    from swarmeval.diagnostics import smells as S
+    saved, saved_smells = dict(S._REGISTRY), list(SMELLS)
+    yield S
+    S._REGISTRY.clear()
+    S._REGISTRY.update(saved)
+    SMELLS[:] = saved_smells
+
+
+def test_register_smell_runs_custom_detector(demo, smell_registry):
+    from swarmeval import SmellContext, register_smell
+
+    def custom(c):
+        assert isinstance(c, SmellContext)
+        c.add("custom_smell", "low", c.agents[:1], "observed", "may", "re-run", {"n": 1})
+
+    traj, cm = demo.runs.trajectories[0], demo.per_run_coordination[0]
+    builtin = [d.to_dict() for d in detect_smells(traj, cm)]
+    register_smell("custom_smell", custom)
+    assert SMELLS[-1] == "custom_smell"
+    out = detect_smells(traj, cm)
+    assert [d.to_dict() for d in out[:-1]] == builtin
+    assert out[-1].smell == "custom_smell" and out[-1].evidence == {"n": 1} and out[-1].run_id == traj.run_id
+    register_smell("custom_smell", lambda c: None)
+    assert SMELLS.count("custom_smell") == 1
+    assert [d.to_dict() for d in detect_smells(traj, cm)] == builtin
+
+
+def test_late_and_premature_registers_two_smells(smell_registry):
+    S = smell_registry
+    assert list(S._REGISTRY) == ["redundant_delegation", "agent_ping_pong", "over_agentization",
+                                 "under_specialization", "coordinator_bottleneck", "late_and_premature",
+                                 "context_bloat", "dead_agent", "serialized_execution", "communication_overhead"]
+    assert S._REGISTRY["late_and_premature"] is S._late_and_premature
+    assert SMELLS == ["redundant_delegation", "agent_ping_pong", "over_agentization", "under_specialization",
+                      "coordinator_bottleneck", "late_information", "premature_synthesis", "context_bloat",
+                      "dead_agent", "serialized_execution", "communication_overhead"]
+
+
 def D(smell, sev, run, agents=(), inferred=False, obs=None):
     return Diagnostic(smell, sev, run, list(agents), obs or f"{smell} {sev} in {run}", "may", "test", {}, inferred)
 
