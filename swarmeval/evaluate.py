@@ -285,11 +285,15 @@ def evaluate(swarm: Any, benchmark: Benchmark, trials: int = 1, seed: int = 0, e
     given, overrides the task and benchmark evaluators.  ``capture_text=False``
     keeps only short previews of prompts, outputs and artifacts.
     ``coordination``, ``similarity`` and ``smell_config`` are passed to
-    ``analyze_runs``.
+    ``analyze_runs``; the similarity backend is resolved before any run, so a
+    missing optional dependency fails fast.  If the analysis fails after the
+    runs, ``AnalysisFailed`` carries them and the plain evaluation.
     """
     opts = RunOptions(trials=trials, seed=seed, clock_factory=clock_factory, pricing=pricing, evaluator=evaluator,
                       progress=progress, raise_errors=raise_errors, on_run=on_run, capture_text=capture_text,
                       max_text_chars=max_text_chars)
+    if coordination:
+        similarity = resolve_similarity(similarity)   # a missing backend fails here, before any (paid) run
     runs = SwarmRunner(swarm, benchmark, label=label, options=opts).run()
     try:
         return analyze_runs(runs, coordination=coordination, similarity=similarity, smell_config=smell_config)

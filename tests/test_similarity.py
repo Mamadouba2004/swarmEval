@@ -94,6 +94,25 @@ def test_embedding_missing_extra_fails_at_construction(monkeypatch):
     assert EmbeddingSimilarity(embed_fn=lambda texts: [[1.0]] * len(texts)).embed_fn is not None
 
 
+def test_missing_embeddings_extra_stops_evaluate_before_any_run(monkeypatch, tmp_path):
+    from swarmeval import evaluate
+    from swarmeval.cli import main
+    from swarmeval.examples.research_swarm import build_benchmark
+    _fake_find_spec(monkeypatch, found=False)
+    ran = []
+
+    def swarm(task, ctx):
+        ran.append(task.task_id)
+        return "x"
+
+    with pytest.raises(ImportError, match="needs sentence-transformers"):
+        evaluate(swarm, build_benchmark(2), similarity="embeddings")
+    assert ran == []                                         # nothing ran, nothing was paid for
+    with pytest.raises(SystemExit, match="^swarmeval: --similarity: .*needs sentence-transformers"):
+        main(["demo", "--trials", "1", "--similarity", "embeddings", "--out", str(tmp_path)])
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_resolve_similarity(monkeypatch):
     assert isinstance(resolve_similarity(None), LexicalSimilarity)
     assert isinstance(resolve_similarity("lexical"), LexicalSimilarity)
