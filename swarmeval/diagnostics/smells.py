@@ -152,11 +152,42 @@ class CommunicationOverheadConfig:
     min_messages: int = 3
 
 
+OLD_FLAT_KEYS = {
+    "delegation_similarity": "redundant_delegation.similarity",
+    "pingpong_min_alternations": "agent_ping_pong.min_alternations",
+    "pingpong_high": "agent_ping_pong.high",
+    "overagent_min_agents": "over_agentization.min_agents",
+    "overagent_low_contrib_frac": "over_agentization.low_contrib_frac",
+    "simple_task_max_agents": "over_agentization.simple_task_max_agents",
+    "underspec_overlap": "under_specialization.overlap",
+    "hub_share": "coordinator_bottleneck.share",
+    "hub_min_peers": "coordinator_bottleneck.min_peers",
+    "hub_relay_frac": "coordinator_bottleneck.relay_frac",
+    "hub_cp_share": "coordinator_bottleneck.cp_share",
+    "hub_high_share": "coordinator_bottleneck.high_share",
+    "bloat_ratio": "context_bloat.ratio",
+    "bloat_min_excess": "context_bloat.min_excess",
+    "bloat_high_ratio": "context_bloat.high_ratio",
+    "dead_min_coverage": "dead_agent.min_coverage",
+    "dead_high_token_share": "dead_agent.high_token_share",
+    "serial_ratio": "serialized_execution.ratio",
+    "serial_high": "serialized_execution.high",
+    "serial_min_gap_s": "serialized_execution.min_gap_s",
+    "serial_min_gap_frac": "serialized_execution.min_gap_frac",
+    "serial_min_coverage": "serialized_execution.min_coverage",
+    "comm_ratio": "communication_overhead.ratio",
+    "comm_high": "communication_overhead.high",
+    "comm_min_messages": "communication_overhead.min_messages",
+}
+
+
 def _reject_unknown_sections(names: Iterable[str]) -> None:
-    """Raise ValueError naming any section that no registered detector configures."""
+    """Raise ValueError naming any section that no registered detector configures, and where old flat keys went."""
     unknown = sorted(k for k in names if k not in _CONFIG_CLASSES)
     if unknown:
-        raise ValueError(f"unknown smell config section(s) {unknown}; known: {sorted(_CONFIG_CLASSES)}")
+        moved = [f"{k} is now {OLD_FLAT_KEYS[k]}" for k in unknown if k in OLD_FLAT_KEYS]
+        hint = f"; {', '.join(moved)} (see README)" if moved else ""
+        raise ValueError(f"unknown smell config section(s) {unknown}; known: {sorted(_CONFIG_CLASSES)}{hint}")
 
 
 class SmellConfig(dict[str, Any]):

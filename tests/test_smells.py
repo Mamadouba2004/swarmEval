@@ -673,6 +673,21 @@ def test_detect_smells_rejects_stale_section_after_reregistration(demo, smell_re
     assert seen == [New(), Late()]
 
 
+def test_flat_config_key_error_names_new_location(tmp_path):
+    p = tmp_path / "old.json"
+    p.write_text(json.dumps({"bloat_ratio": 2.0, "hub_share": 0.9}))
+    with pytest.raises(ValueError, match=r"bloat_ratio is now context_bloat\.ratio.*hub_share is now "
+                                         r"coordinator_bottleneck\.share \(see README\)"):
+        load_smell_config(str(p))
+    with pytest.raises(ValueError, match=r"bloat_ratio is now context_bloat\.ratio"):
+        SmellConfig(bloat_ratio=2.0)
+    with pytest.raises(ValueError) as e:
+        SmellConfig.from_dict({"bloat": {}})
+    assert "is now" not in str(e.value)
+    from swarmeval.diagnostics.smells import OLD_FLAT_KEYS
+    assert OLD_FLAT_KEYS == {old: new for old, (new, _) in OLD_FLAT_DEFAULTS.items()}
+
+
 def test_late_and_premature_registers_two_smells(smell_registry):
     S = smell_registry
     assert list(S._REGISTRY) == ["redundant_delegation", "agent_ping_pong", "over_agentization",
