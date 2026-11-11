@@ -202,3 +202,17 @@ def test_exception_tracker_follows_cause_chain():
     assert errors.origin_of(wrapped) == (e, "ev_x")
     assert errors.propagation_meta(wrapped) == {"propagated": True, "origin_event_id": "ev_x"}
     assert errors.propagation_meta(KeyError("unrelated")) == {}
+
+
+def test_mailbox_put_drain_peek():
+    from swarmeval.recorder import _Mailbox
+    box = _Mailbox()
+    assert box.peek("b") == [] and box.drain("b") == []
+    box.put("b", "m1")
+    box.put("c", "other")
+    box.put("b", "m2")
+    peeked = box.peek("b")
+    peeked.append("not stored")
+    assert box.peek("b") == ["m1", "m2"]
+    assert box.drain("b") == ["m1", "m2"]
+    assert box.drain("b") == [] and box.peek("c") == ["other"]

@@ -41,6 +41,7 @@ Classes:
 - ToolCall: Mutable handle yielded by ``AgentSpan.tool_call``.
 - _ExceptionTracker: Which event first recorded each exception, so a re-recorded (or wrapping) one is marked
   ``propagated``. Has its own lock.
+- _Mailbox: Per-agent message queues (storage only), with their own lock.
 - RunContext: Everything a swarm needs during one run: recording, messaging, seeded randomness and the clock.
 - AgentSpan: Context manager (sync or async) for one agent invocation.
 """
@@ -308,6 +309,28 @@ class _ExceptionTracker:
         return {"propagated": True, "origin_event_id": origin[1]}
 
 
+class _Mailbox:
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._boxes: dict[str, list[Message]] = {}
+
+    def put(self, receiver: str, msg: Message) -> None:
+        """Append ``msg`` to ``receiver``'s mailbox."""
+        with self._lock:
+            self._boxes.setdefault(receiver, []).append(msg)
+
+    def drain(self, agent_id: str) -> list[Message]:
+        """Remove and return ``agent_id``'s messages in arrival order."""
+        with self._lock:
+            return self._boxes.pop(agent_id, [])
+
+    def peek(self, agent_id: str) -> list[Message]:
+        """A copy of ``agent_id``'s waiting messages, leaving them in place."""
+        with self._lock:
+            return list(self._boxes.get(agent_id, []))
+
+
 class RunContext:
 
     def __init__(self, task: Task, run_id: str | None = None, clock: Clock | None = None,
@@ -326,7 +349,7 @@ class RunContext:
         self.trajectory.metadata.update(self.text_policy.to_metadata())
         self.trajectory.metadata["schema_version"] = SCHEMA_VERSION
         self._lock = threading.RLock()
-        self._mailbox: dict[str, list[Message]] = {}
+        self._mailbox = _Mailbox()
         self._errors = _ExceptionTracker()
         self._started = False
         self._finished = False
@@ -440,16 +463,13 @@ class RunContext:
                          input_artifacts=art_ids, metadata=dict(metadata), message_id=msg_id, reply_to=reply_id)
         msg = Message(msg_id, sender, receiver, content, kind, art_ids, ev.timestamp, tokens, ev.event_id,
                       dict(metadata), reply_id)
-        with self._lock:
-            self._mailbox.setdefault(receiver, []).append(msg)
+        self._mailbox.put(receiver, msg)
         return msg
 
     def receive(self, agent_id: str, _span: AgentSpan | None = None) -> list[Message]:
         """Drain ``agent_id``'s mailbox, recording one MESSAGE_RECEIVE per message; its artifacts are listed
         as ``input_artifacts`` because they arrived, not because they were used."""
-        with self._lock:
-            msgs = self._mailbox.get(agent_id, [])
-            self._mailbox[agent_id] = []
+        msgs = self._mailbox.drain(agent_id)
         span = _span if _span is not None else _current_span.get()
         if span is not None and span.agent_id != agent_id:
             span = None
@@ -467,8 +487,7 @@ class RunContext:
 
     def inbox(self, agent_id: str) -> list[Message]:
         """Peek at the mailbox without draining it; records nothing."""
-        with self._lock:
-            return list(self._mailbox.get(agent_id, []))
+        return self._mailbox.peek(agent_id)
 
     def _branch_seeds(self, n: int) -> list[int]:
         """Draw one seed per concurrent branch from the current generator."""
