@@ -122,7 +122,7 @@ def test_ping_pong_thresholds():
     six = of(exchange(7), "agent_ping_pong")
     assert len(six) == 1 and six[0].severity == "medium" and six[0].evidence["alternations"] == 6
     assert of(exchange(9), "agent_ping_pong")[0].severity == "high"
-    assert not of(exchange(7, smell_config={"pingpong_min_alternations": 7}), "agent_ping_pong")
+    assert not of(exchange(7, smell_config={"agent_ping_pong": {"min_alternations": 7}}), "agent_ping_pong")
 
 
 def test_sequential_delegation_is_not_ping_pong():
@@ -465,19 +465,20 @@ def test_dead_agent_needs_complete_provenance():
 
 def test_smell_config_overrides_and_unknown_keys(tmp_path, demo):
     p = tmp_path / "smells.json"
-    p.write_text(json.dumps({"bloat_ratio": 100.0, "hub_share": 0.99}))
+    p.write_text(json.dumps({"context_bloat": {"ratio": 100.0}, "coordinator_bottleneck": {"share": 0.99}}))
     cfg = load_smell_config(str(p))
-    assert cfg.bloat_ratio == 100.0 and cfg.hub_share == 0.99 and cfg.dead_min_coverage == 1.0
+    assert cfg["context_bloat"].ratio == 100.0 and cfg["coordinator_bottleneck"].share == 0.99
+    assert cfg["dead_agent"].min_coverage == 1.0 and cfg["context_bloat"].min_excess == 2000
     bad = tmp_path / "bad.json"
-    bad.write_text(json.dumps({"bloat_ratoi": 2}))
-    with pytest.raises(ValueError, match="bloat_ratoi"):
+    bad.write_text(json.dumps({"context_bloat": {"ratoi": 2}}))
+    with pytest.raises(ValueError, match="ratoi"):
         load_smell_config(str(bad))
     with pytest.raises(ValueError):
         resolve_smell_config({"nope": 1})
     assert resolve_smell_config(None) == SmellConfig()
     traj = demo.runs.trajectories[0]
     assert "context_bloat" not in names(compute_coordination(traj, smell_config=cfg))
-    for spec in (cfg, {"bloat_ratio": 100.0}, str(p)):
+    for spec in (cfg, {"context_bloat": {"ratio": 100.0}}, str(p)):
         res = analyze_runs(demo.runs.__class__("x", "b", [traj]), smell_config=spec)
         assert "context_bloat" not in res.coordination.diagnostics.names
 
@@ -492,8 +493,10 @@ def test_detect_smells_runs_on_precomputed_metrics(demo):
 @pytest.fixture
 def smell_registry():
     from swarmeval.diagnostics import smells as S
-    saved, saved_smells = dict(S._REGISTRY), list(SMELLS)
+    saved, saved_smells, saved_cls = dict(S._REGISTRY), list(SMELLS), dict(S._CONFIG_CLASSES)
     yield S
+    S._CONFIG_CLASSES.clear()
+    S._CONFIG_CLASSES.update(saved_cls)
     S._REGISTRY.clear()
     S._REGISTRY.update(saved)
     SMELLS[:] = saved_smells
@@ -502,8 +505,8 @@ def smell_registry():
 def test_register_smell_runs_custom_detector(demo, smell_registry):
     from swarmeval import SmellContext, register_smell
 
-    def custom(c):
-        assert isinstance(c, SmellContext)
+    def custom(c, section):
+        assert isinstance(c, SmellContext) and section is None
         c.add("custom_smell", "low", c.agents[:1], "observed", "may", "re-run", {"n": 1})
 
     traj, cm = demo.runs.trajectories[0], demo.per_run_coordination[0]
@@ -513,9 +516,104 @@ def test_register_smell_runs_custom_detector(demo, smell_registry):
     out = detect_smells(traj, cm)
     assert [d.to_dict() for d in out[:-1]] == builtin
     assert out[-1].smell == "custom_smell" and out[-1].evidence == {"n": 1} and out[-1].run_id == traj.run_id
-    register_smell("custom_smell", lambda c: None)
+    register_smell("custom_smell", lambda c, section: None)
     assert SMELLS.count("custom_smell") == 1
     assert [d.to_dict() for d in detect_smells(traj, cm)] == builtin
+
+
+OLD_FLAT_DEFAULTS = {
+    "delegation_similarity": ("redundant_delegation.similarity", 0.8),
+    "pingpong_min_alternations": ("agent_ping_pong.min_alternations", 5),
+    "pingpong_high": ("agent_ping_pong.high", 8),
+    "overagent_min_agents": ("over_agentization.min_agents", 4),
+    "overagent_low_contrib_frac": ("over_agentization.low_contrib_frac", 0.34),
+    "simple_task_max_agents": ("over_agentization.simple_task_max_agents", 2),
+    "underspec_overlap": ("under_specialization.overlap", 0.5),
+    "hub_share": ("coordinator_bottleneck.share", 0.6),
+    "hub_min_peers": ("coordinator_bottleneck.min_peers", 3),
+    "hub_relay_frac": ("coordinator_bottleneck.relay_frac", 0.5),
+    "hub_cp_share": ("coordinator_bottleneck.cp_share", 0.25),
+    "hub_high_share": ("coordinator_bottleneck.high_share", 0.8),
+    "bloat_ratio": ("context_bloat.ratio", 3.0),
+    "bloat_min_excess": ("context_bloat.min_excess", 2000),
+    "bloat_high_ratio": ("context_bloat.high_ratio", 10.0),
+    "dead_min_coverage": ("dead_agent.min_coverage", 1.0),
+    "dead_high_token_share": ("dead_agent.high_token_share", 0.2),
+    "serial_ratio": ("serialized_execution.ratio", 1.5),
+    "serial_high": ("serialized_execution.high", 2.5),
+    "serial_min_gap_s": ("serialized_execution.min_gap_s", 1.0),
+    "serial_min_gap_frac": ("serialized_execution.min_gap_frac", 0.2),
+    "serial_min_coverage": ("serialized_execution.min_coverage", 0.5),
+    "comm_ratio": ("communication_overhead.ratio", 0.25),
+    "comm_high": ("communication_overhead.high", 0.5),
+    "comm_min_messages": ("communication_overhead.min_messages", 3),
+}
+
+
+def test_smell_config_defaults_match_previous_flat_values():
+    from dataclasses import fields
+    cfg = SmellConfig()
+    seen = set()
+    for old, (new, value) in OLD_FLAT_DEFAULTS.items():
+        section, name = new.split(".")
+        assert getattr(cfg[section], name) == value, old
+        seen.add(new)
+    assert {f"{s}.{f.name}" for s, sec in cfg.items() for f in fields(sec)} == seen
+    assert "late_and_premature" not in cfg
+
+
+def test_nested_config_rejects_unknown_section_and_field():
+    with pytest.raises(ValueError, match=r"unknown smell config section\(s\) \['bloat'\]; known: .*context_bloat"):
+        SmellConfig.from_dict({"bloat": {"ratio": 2.0}})
+    with pytest.raises(ValueError, match=r"context_bloat.*\['ratoi'\].*known: \['high_ratio', 'min_excess', 'ratio'\]"):
+        SmellConfig.from_dict({"context_bloat": {"ratoi": 2.0}})
+    with pytest.raises(ValueError, match="context_bloat"):
+        SmellConfig.from_dict({"context_bloat": 2.0})
+    cfg = resolve_smell_config({"context_bloat": {"ratio": 2.0}})
+    assert cfg["context_bloat"].ratio == 2.0 and cfg["context_bloat"].min_excess == 2000
+    assert cfg["dead_agent"] == SmellConfig()["dead_agent"]
+
+
+def test_register_smell_with_config_cls_reads_json_section(demo, smell_registry):
+    from dataclasses import dataclass
+
+    from swarmeval import register_smell
+
+    @dataclass
+    class FanOutConfig:
+        max_agents: int = 5
+        severity: str = "low"
+
+    seen = []
+
+    def fan_out(c, section):
+        seen.append(section.max_agents)
+        if len(c.agents) > section.max_agents:
+            c.add("fan_out", section.severity, c.agents, "observed", "may", "re-run", {})
+
+    register_smell("fan_out", fan_out, config_cls=FanOutConfig)
+    assert SmellConfig()["fan_out"] == FanOutConfig()
+    traj, cm = demo.runs.trajectories[0], demo.per_run_coordination[0]
+    out = detect_smells(traj, cm, resolve_smell_config({"fan_out": {"max_agents": 1}}))
+    assert seen == [1] and out[-1].smell == "fan_out" and out[-1].severity == "low"
+
+
+def test_detector_receives_only_its_section(demo, smell_registry):
+    from dataclasses import dataclass
+
+    from swarmeval import register_smell
+
+    @dataclass
+    class SpyConfig:
+        limit: float = 0.5
+
+    calls = []
+    register_smell("spy", lambda c, section: calls.append((c, section)), config_cls=SpyConfig)
+    register_smell("spy_bare", lambda c, section: calls.append((c, section)))
+    detect_smells(demo.runs.trajectories[0], demo.per_run_coordination[0])
+    (ctx, section), (_, bare) = calls
+    assert section == SpyConfig() and not isinstance(section, SmellConfig) and bare is None
+    assert not hasattr(ctx, "cfg")
 
 
 def test_late_and_premature_registers_two_smells(smell_registry):

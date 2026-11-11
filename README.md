@@ -171,22 +171,64 @@ Everything below is computed from the recorded trajectory alone and is observati
 | Dependency coverage | share of messages with a recorded receive event |
 | Observed contribution | provenance: final-output lineage, artifacts consumed by others, `dead` (nothing used, complete provenance) -- not marginal effect |
 
-**Swarm smells** (`detect_smells`, one list per run in `cm.diagnostics`, prevalence over runs in `result.coordination.diagnostics`) are hypotheses to test, not verdicts. Each has an *observation* (measured, with numbers), a *hypothesis* ("may", "is consistent with") and an *intervention* naming a concrete experiment (e.g. "re-run without researcher_c and compare success and cost"). Detected: `redundant_delegation`, `agent_ping_pong`, `over_agentization`, `under_specialization`, `coordinator_bottleneck`, `late_information`, `premature_synthesis`, `context_bloat`, `dead_agent`, `serialized_execution`, `communication_overhead`. Thresholds live in `SmellConfig` (initial guesses, to be validated with Phase 3 ablations) and can be overridden with a JSON object: `analyze_runs(runs, smell_config="smells.json")` or `--smells-config smells.json`; unknown keys are rejected. Evidence resting on inferred edges is marked `inferred` and its severity capped.
+**Swarm smells** (`detect_smells`, one list per run in `cm.diagnostics`, prevalence over runs in `result.coordination.diagnostics`) are hypotheses to test, not verdicts. Each has an *observation* (measured, with numbers), a *hypothesis* ("may", "is consistent with") and an *intervention* naming a concrete experiment (e.g. "re-run without researcher_c and compare success and cost"). Detected: `redundant_delegation`, `agent_ping_pong`, `over_agentization`, `under_specialization`, `coordinator_bottleneck`, `late_information`, `premature_synthesis`, `context_bloat`, `dead_agent`, `serialized_execution`, `communication_overhead`. Thresholds are initial guesses, to be validated with Phase 3 ablations. Each detector has its own config dataclass (`ContextBloatConfig`, `CoordinatorBottleneckConfig`, ...; `late_and_premature` has none), and `SmellConfig` maps each detector's registration name to its section, so `cfg["context_bloat"].ratio`. Override them with nested JSON that names only the fields to change: `analyze_runs(runs, smell_config="smells.json")`, `smell_config={"context_bloat": {"ratio": 2.0}}` or `--smells-config smells.json`, with
+
+```json
+{"context_bloat": {"ratio": 2.0, "min_excess": 500}, "coordinator_bottleneck": {"share": 0.7}}
+```
+
+Unknown sections and unknown fields within a section are rejected, naming the known ones. Evidence resting on inferred edges is marked `inferred` and its severity capped.
+
+The flat keys used before map to sections as follows:
+
+| Old flat key | New `section.field` |
+|---|---|
+| `delegation_similarity` | `redundant_delegation.similarity` |
+| `pingpong_min_alternations` | `agent_ping_pong.min_alternations` |
+| `pingpong_high` | `agent_ping_pong.high` |
+| `overagent_min_agents` | `over_agentization.min_agents` |
+| `overagent_low_contrib_frac` | `over_agentization.low_contrib_frac` |
+| `simple_task_max_agents` | `over_agentization.simple_task_max_agents` |
+| `underspec_overlap` | `under_specialization.overlap` |
+| `hub_share` | `coordinator_bottleneck.share` |
+| `hub_min_peers` | `coordinator_bottleneck.min_peers` |
+| `hub_relay_frac` | `coordinator_bottleneck.relay_frac` |
+| `hub_cp_share` | `coordinator_bottleneck.cp_share` |
+| `hub_high_share` | `coordinator_bottleneck.high_share` |
+| `bloat_ratio` | `context_bloat.ratio` |
+| `bloat_min_excess` | `context_bloat.min_excess` |
+| `bloat_high_ratio` | `context_bloat.high_ratio` |
+| `dead_min_coverage` | `dead_agent.min_coverage` |
+| `dead_high_token_share` | `dead_agent.high_token_share` |
+| `serial_ratio` | `serialized_execution.ratio` |
+| `serial_high` | `serialized_execution.high` |
+| `serial_min_gap_s` | `serialized_execution.min_gap_s` |
+| `serial_min_gap_frac` | `serialized_execution.min_gap_frac` |
+| `serial_min_coverage` | `serialized_execution.min_coverage` |
+| `comm_ratio` | `communication_overhead.ratio` |
+| `comm_high` | `communication_overhead.high` |
+| `comm_min_messages` | `communication_overhead.min_messages` |
 
 On the demo swarm the report flags `context_bloat` (synthesizer and coordinator), `under_specialization` and `redundant_delegation` (researchers a and c share a scope), `coordinator_bottleneck` and `dead_agent` (researcher_c), the problems built into it.
 
-**Adding a custom smell** (Python API only; the CLI does not load plugins): write a detector that takes a `SmellContext` and calls `ctx.add(...)` for each diagnostic, then register it before analysing runs. It runs after the built-in detectors and its smell names are appended to `SMELLS`; registering the same name again replaces the detector. A detector that emits several smells passes them as `smells=(...)`. The `swarmeval.diagnostics.smells` module docstring lists what a `SmellContext` holds.
+**Adding a custom smell** (Python API only; the CLI does not load plugins): write a detector that takes a `SmellContext` and calls `ctx.add(...)` for each diagnostic, then register it before analysing runs. It runs after the built-in detectors and its smell names are appended to `SMELLS`; registering the same name again replaces the detector. A detector that emits several smells passes them as `smells=(...)`. The `swarmeval.diagnostics.smells` module docstring lists what a `SmellContext` holds. A detector is called as `detector(ctx, section)`: thresholds go in a dataclass passed as `config_cls=`, and `section` is its instance (None without a `config_cls`). The class becomes a section of `SmellConfig` under the registration name, so the same JSON configures it: `{"too_many_agents": {"max_agents": 8}}`.
 
 ```python
+from dataclasses import dataclass
+
 from swarmeval import SmellContext, register_smell
 
-def too_many_agents(ctx: SmellContext) -> None:
-    if len(ctx.agents) > 5:
+@dataclass
+class TooManyAgentsConfig:
+    max_agents: int = 5
+
+def too_many_agents(ctx: SmellContext, section: TooManyAgentsConfig) -> None:
+    if len(ctx.agents) > section.max_agents:
         ctx.add("too_many_agents", "low", ctx.agents, f"{len(ctx.agents)} agents took part.",
                 "A swarm this large may be spending more on coordination than it gains.",
                 "Re-run with fewer agents and compare success and cost.", {"agents": len(ctx.agents)})
 
-register_smell("too_many_agents", too_many_agents)
+register_smell("too_many_agents", too_many_agents, config_cls=TooManyAgentsConfig)
 ```
 
 **Graph export**: `swarmeval graph runs.json [--run N] [--view agents|dag] [--format mermaid|dot|json] [--out FILE]` writes one run's agent graph (token share per agent, dead agents dashed red, timing-inferred edges dashed, edges labelled `kind ×count · tokens`) or work-unit DAG (grouped by agent, critical path highlighted). Mermaid renders on GitHub and mermaid.live; DOT with `dot -Tsvg`. In Python: `to_mermaid(cm.graph, view="agents", coordination=cm)`, `to_dot`, `to_json`.

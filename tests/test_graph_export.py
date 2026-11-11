@@ -127,7 +127,7 @@ def test_cli_coordination_flags(tmp_path, demo, capsys):
     assert main(["report", str(saved), "--no-coordination"]) == 0
     assert "COORDINATION" not in capsys.readouterr().out
     cfg = tmp_path / "smells.json"
-    cfg.write_text(json.dumps({"bloat_ratio": 1000.0}))
+    cfg.write_text(json.dumps({"context_bloat": {"ratio": 1000.0}}))
     assert main(["report", str(saved), "--smells-config", str(cfg), "--similarity", "lexical"]) == 0
     text = capsys.readouterr().out
     assert "DIAGNOSTICS" in text and "context_bloat" not in text
@@ -189,10 +189,10 @@ def coordination_calls(monkeypatch):
 
 def test_graph_uses_report_analysis_options(saved_demo, coordination_calls, tmp_path):
     cfg = tmp_path / "s.json"
-    cfg.write_text(json.dumps({"hub_share": 0.9}))
+    cfg.write_text(json.dumps({"coordinator_bottleneck": {"share": 0.9}}))
     main(["graph", saved_demo, "--similarity", "lexical", "--smells-config", str(cfg)])
     (kw,) = coordination_calls
-    assert isinstance(kw["similarity"], LexicalSimilarity) and kw["smell_config"].hub_share == 0.9
+    assert isinstance(kw["similarity"], LexicalSimilarity) and kw["smell_config"]["coordinator_bottleneck"].share == 0.9
 
 
 def test_graph_no_coordination_skips_the_analysis(saved_demo, coordination_calls):

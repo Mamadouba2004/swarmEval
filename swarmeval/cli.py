@@ -8,7 +8,7 @@
     swarmeval graph runs/baseline.json [--run N] [--view agents|dag] [--format mermaid|dot|json] [--out F]
 
 demo, run, report and compare also take --no-coordination, --similarity NAME|pkg.mod:attr and
---smells-config FILE (JSON object of SmellConfig threshold overrides).
+--smells-config FILE (nested JSON of smell threshold overrides, {"context_bloat": {"ratio": 2.0}}).
 """
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def _add_analysis_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--similarity", default=None, metavar="NAME|pkg.mod:attr",
                    help="artifact redundancy backend: lexical (default), embeddings, or an import path")
     p.add_argument("--smells-config", default=None, metavar="FILE",
-                   help="JSON object overriding smell thresholds (see SmellConfig)")
+                   help='nested JSON of smell threshold overrides, e.g. {"context_bloat": {"ratio": 2.0}}')
 
 
 def _write_outputs(result: EvaluationResult, out: str | None) -> None:

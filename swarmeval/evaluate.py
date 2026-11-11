@@ -14,8 +14,8 @@ evaluation, with the per-run errors in ``coordination_errors``.
 can be re-analysed.  With ``pricing`` every LLM call is re-priced from its
 recorded model and token counts.  ``coordination=False`` skips the
 execution-graph analysis; ``similarity`` is the artifact-redundancy backend
-and ``smell_config`` the smell thresholds (``SmellConfig``, a dict of
-overrides or a JSON path).  A run whose analysis fails is left out of the
+and ``smell_config`` the smell thresholds (``SmellConfig``, a nested dict
+of overrides or a JSON path).  A run whose analysis fails is left out of the
 coordination summary with a warning; when two or more runs all fail with the
 same exception type, the error is raised.
 

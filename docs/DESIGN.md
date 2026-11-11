@@ -98,7 +98,37 @@ ESLint for agent architectures. Each smell is a *hypothesis from trajectory evid
 | Serialized execution | large gap between potential and actual parallelism |
 | Communication overhead | message tokens are a large share of LLM tokens |
 
-Cross-run aggregation (`diagnostics/engine.py`) reports prevalence: each run counts once per smell, agents once per run, grouped by smell, sorted by severity then prevalence. Thresholds (`SmellConfig`, JSON-overridable) are initial guesses; they are to be validated against Phase 3 ablations (does removing the flagged agent / capping the flagged exchange change success and cost as the hypothesis predicts?). Evidence that rests on timing-inferred edges is marked `inferred` and its severity capped. Wording is checked by a test: no causal claims, no "contributed N%".
+Cross-run aggregation (`diagnostics/engine.py`) reports prevalence: each run counts once per smell, agents once per run, grouped by smell, sorted by severity then prevalence. Thresholds are initial guesses; they are to be validated against Phase 3 ablations (does removing the flagged agent / capping the flagged exchange change success and cost as the hypothesis predicts?). Evidence that rests on timing-inferred edges is marked `inferred` and its severity capped. Wording is checked by a test: no causal claims, no "contributed N%".
+
+Each detector owns its thresholds: `register_smell(name, detector, smells=None, config_cls=None)` stores a config dataclass with the detector, and `detect_smells` calls `detector(ctx, section)` with that detector's section only (None without a `config_cls`); `SmellContext` carries no config. `SmellConfig` maps registration names to sections and holds a default for every registered `config_cls`, custom ones included. It is overridden with nested JSON, `{"context_bloat": {"ratio": 2.0}}`, changing only the fields given; an unknown section or field is an error. A custom smell configured this way needs no change here. The flat keys used before map to sections as follows:
+
+| Old flat key | New `section.field` |
+|---|---|
+| `delegation_similarity` | `redundant_delegation.similarity` |
+| `pingpong_min_alternations` | `agent_ping_pong.min_alternations` |
+| `pingpong_high` | `agent_ping_pong.high` |
+| `overagent_min_agents` | `over_agentization.min_agents` |
+| `overagent_low_contrib_frac` | `over_agentization.low_contrib_frac` |
+| `simple_task_max_agents` | `over_agentization.simple_task_max_agents` |
+| `underspec_overlap` | `under_specialization.overlap` |
+| `hub_share` | `coordinator_bottleneck.share` |
+| `hub_min_peers` | `coordinator_bottleneck.min_peers` |
+| `hub_relay_frac` | `coordinator_bottleneck.relay_frac` |
+| `hub_cp_share` | `coordinator_bottleneck.cp_share` |
+| `hub_high_share` | `coordinator_bottleneck.high_share` |
+| `bloat_ratio` | `context_bloat.ratio` |
+| `bloat_min_excess` | `context_bloat.min_excess` |
+| `bloat_high_ratio` | `context_bloat.high_ratio` |
+| `dead_min_coverage` | `dead_agent.min_coverage` |
+| `dead_high_token_share` | `dead_agent.high_token_share` |
+| `serial_ratio` | `serialized_execution.ratio` |
+| `serial_high` | `serialized_execution.high` |
+| `serial_min_gap_s` | `serialized_execution.min_gap_s` |
+| `serial_min_gap_frac` | `serialized_execution.min_gap_frac` |
+| `serial_min_coverage` | `serialized_execution.min_coverage` |
+| `comm_ratio` | `communication_overhead.ratio` |
+| `comm_high` | `communication_overhead.high` |
+| `comm_min_messages` | `communication_overhead.min_messages` |
 
 ## 6. Counterfactual evaluation (`causal/`)
 
