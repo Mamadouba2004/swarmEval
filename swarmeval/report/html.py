@@ -217,25 +217,17 @@ def _clip(cx: float, cy: float, tx: float, ty: float) -> tuple[float, float]:
     return cx + dx * s, cy + dy * s
 
 
-def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: CoordinationMetrics | None = None) -> str:
-    """Agent graph of one run as inline SVG plus legend; edges are dashed when delivery was inferred or
-    never happened, and grow with tokens."""
-    agents = list(graph.agents)
-    if not agents:
-        return '<p class="note">no agents recorded</p>'
-    first = _first_start(traj, agents)
-    pos = _layout(graph, first)
-    xs = [x for x, _ in pos.values()] + [x + _NODE_W for x, _ in pos.values()]
-    ys = [y for _, y in pos.values()] + [y + _NODE_H for _, y in pos.values()]
+def _svg_edges(graph: ExecutionGraph, pos: dict[str, tuple[float, float]], xs: list[float],
+               ys: list[float]) -> list[str]:
+    """Arrow markers and one curved path per agent edge, avoiding the nodes; extends ``xs``/``ys`` to fit them."""
     inferred = _inferred(graph)
     undelivered: dict[tuple[str, str], int] = {}
     for m in graph.messages:
         if m.receive_node is None and m.sender is not None and m.receiver is not None:
             undelivered[(m.sender, m.receiver)] = undelivered.get((m.sender, m.receiver), 0) + 1
-    hub = cm.communication.hub_agent if cm is not None and cm.communication is not None else None
     max_tok = max([e.tokens for e in graph.agent_edges] + [1])
 
-    parts = ["", "<defs>"]
+    parts = ["<defs>"]
     for k in _KIND_ORDER:
         parts.append(f'<marker id="se-arr-{k}" markerWidth="8" markerHeight="8" refX="7" refY="4" '
                      f'orient="auto" markerUnits="userSpaceOnUse"><path class="mk {k}" d="M0,0 L8,4 L0,8 z"/></marker>')
@@ -281,6 +273,13 @@ def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: CoordinationMetrics |
         if e.count > 1:
             mx, my = 0.25 * x1 + 0.5 * qx + 0.25 * x2, 0.25 * y1 + 0.5 * qy + 0.25 * y2
             parts.append(f'<text class="m" x="{mx:.0f}" y="{my - 3:.0f}" text-anchor="middle">×{e.count}</text>')
+    return parts
+
+
+def _svg_nodes(agents: list[str], pos: dict[str, tuple[float, float]], cm: CoordinationMetrics | None,
+               hub: str | None) -> list[str]:
+    """One box per agent with its role, token share and dead/hub flags."""
+    parts: list[str] = []
     for a in agents:
         x, y = pos[a]
         u = cm.utilization.get(a) if cm is not None else None
@@ -310,11 +309,11 @@ def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: CoordinationMetrics |
                      f'<text x="{x + 10:.0f}" y="{y + 20:.0f}" font-weight="600">{_e(_short(a, 22))}</text>'
                      f'<text class="m{" dead" if dead else ""}" x="{x + 10:.0f}" y="{y + 37:.0f}">{_e(detail)}</text>'
                      "</g>")
-    parts.append("</svg>")
-    x0, y0 = int(min(xs) - _PAD), int(min(ys) - _PAD)
-    W, H = int(max(xs) + _PAD) - x0, int(max(ys) + _PAD) - y0
-    parts[0] = (f'<svg class="fit" width="{W}" height="{H}" viewBox="{x0} {y0} {W} {H}" role="img" '
-                'aria-label="agent graph">')
+    return parts
+
+
+def _svg_legend(cm: CoordinationMetrics | None, hub: str | None) -> str:
+    """The legend and notes under the agent graph."""
     legend = _legend([("message", "message"), ("artifact", "artifact consumed"), ("invocation", "invocation"),
                       ("inf", "dashed: delivery inferred from timing or never delivered"),
                       ("dead", "dead agent (complete provenance, nothing it sent was used)")])
@@ -324,7 +323,26 @@ def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: CoordinationMetrics |
         share = cm.communication.hub_share if cm is not None and cm.communication is not None else None
         notes.append(f'<p class="note">Hub agent: <b>{_e(hub)}</b>'
                      + (f", in {share * 100:.0f}% of messages" if share is not None else "") + ".</p>")
-    return '<div class="panel">' + "".join(parts) + "</div>" + legend + "".join(notes)
+    return legend + "".join(notes)
+
+
+def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: CoordinationMetrics | None = None) -> str:
+    """Agent graph of one run as inline SVG plus legend; edges are dashed when delivery was inferred or
+    never happened, and grow with tokens."""
+    agents = list(graph.agents)
+    if not agents:
+        return '<p class="note">no agents recorded</p>'
+    first = _first_start(traj, agents)
+    pos = _layout(graph, first)
+    xs = [x for x, _ in pos.values()] + [x + _NODE_W for x, _ in pos.values()]
+    ys = [y for _, y in pos.values()] + [y + _NODE_H for _, y in pos.values()]
+    hub = cm.communication.hub_agent if cm is not None and cm.communication is not None else None
+    parts = ["", *_svg_edges(graph, pos, xs, ys), *_svg_nodes(agents, pos, cm, hub), "</svg>"]
+    x0, y0 = int(min(xs) - _PAD), int(min(ys) - _PAD)
+    W, H = int(max(xs) + _PAD) - x0, int(max(ys) + _PAD) - y0
+    parts[0] = (f'<svg class="fit" width="{W}" height="{H}" viewBox="{x0} {y0} {W} {H}" role="img" '
+                'aria-label="agent graph">')
+    return '<div class="panel">' + "".join(parts) + "</div>" + _svg_legend(cm, hub)
 
 
 def _unit_tip(kind: str, ev: Event | None, start: float, end: float, t0: float) -> str:
