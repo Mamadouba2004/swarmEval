@@ -24,7 +24,7 @@ from ..graph.builder import ExecutionGraph, build_graph
 from ..graph.export import _edge_label, _inferred
 from ..schema import Event, Trajectory
 from .text import (CONTRIBUTION_NOTES, _money, _pct, _per_trial, _run_shape, _spread, coordination_caveats,
-                   coordination_rows, durations_note)
+                   coordination_rows, cost_notes, durations_note)
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..metrics.coordination import CoordinationMetrics
@@ -445,9 +445,7 @@ def _phase1(result: Any) -> List[str]:
         _tile("Wall Clock / Run", _spread(eff.wall_clock_s, "s")),
         _tile("Agent Time / Run", f"{eff.agent_time_s.mean:.1f}s", f"waiting {eff.waiting_time_s.mean:.1f}s"),
     ] + ([_tile("Errors (all runs)", f"{eff.errors.total:.0f}")] if eff.errors.total else []))]
-    if not complete:
-        out.append('<p class="note">* cost incomplete: some models have no pricing entry (unpriced calls are '
-                   "excluded, not counted as $0; re-price with <code>swarmeval report --pricing</code>)</p>")
+    out += [f'<p class="note">* {re.sub(r"`([^`]+)`", r"<code>\1</code>", _e(note))}</p>' for note in cost_notes(eff)]
     if not eff.duration_complete:
         out.append(f'<p class="note">* {_e(durations_note(eff))}</p>')
     if eff.per_agent:

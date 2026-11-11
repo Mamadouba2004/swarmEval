@@ -73,6 +73,8 @@ class EfficiencyMetrics:
     cost_complete: bool = True
     duration_complete: bool = True  # False when a call's duration is unknown (a bare stream)
     unknown_duration_calls: int = 0
+    streamed_cost_calls: int = 0     # unknown cost because a stream has no usage
+    unpriced_calls: int = 0          # unknown cost because the model has no pricing entry
     wall_clock_s: float = 0.0
     agent_time_s: float = 0.0     # sum of agent self time (aggregate work)
     llm_latency_s: float = 0.0
@@ -120,6 +122,10 @@ def compute_efficiency(traj: Trajectory, pricing: Optional[PricingTable] = None)
                 m.duration_complete = False
             if cost is None:
                 m.cost_complete = False
+                if ev.metadata.get("cost_unknown"):
+                    m.streamed_cost_calls += 1
+                else:
+                    m.unpriced_calls += 1
             else:
                 m.cost_usd = (m.cost_usd or 0.0) + cost
             if ev.span_id:

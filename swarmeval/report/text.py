@@ -101,9 +101,7 @@ def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
     if eff.errors.total:
         rows.append(("Errors (all runs)", f"{eff.errors.total:.0f}", "⚠"))
     parts = [box("SWARM EVALUATION", rows)]
-    if not eff.cost_complete:
-        parts.append("  * cost incomplete: some models have no pricing entry (unpriced calls are excluded, "
-                     "not counted as $0; re-price with `swarmeval report --pricing`)")
+    parts += ["  * " + note for note in cost_notes(eff)]
     if not eff.duration_complete:
         parts.append("  * " + durations_note(eff))
     if perf.trials > 1:
@@ -209,6 +207,20 @@ def coordination_rows(cs: Any) -> List[Optional[Tuple[str, str]]]:
              ("Dependency Coverage (receive events)", _ranged(cs.message_receive_coverage, pct)),
              ("Derivation Coverage (derived_from)", _ranged(cs.derivation_coverage, pct))]
     return rows
+
+
+def cost_notes(eff: Any) -> List[str]:
+    """Why the cost is incomplete, one note per cause (shared by the text and HTML reports)."""
+    out = []
+    if eff.cost_complete:
+        return out
+    if eff.unpriced_calls or not eff.streamed_cost_calls:
+        out.append("cost incomplete: some models have no pricing entry (unpriced calls are excluded, not counted "
+                   "as $0; re-price with `swarmeval report --pricing`)")
+    if eff.streamed_cost_calls:
+        out.append(f"cost incomplete: {eff.streamed_cost_calls} streamed call(s) have no usage, so their cost is "
+                   "unknown")
+    return out
 
 
 def durations_note(eff: Any) -> str:

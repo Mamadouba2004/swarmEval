@@ -40,6 +40,8 @@ class EfficiencySummary:
     per_agent: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     duration_complete: bool = True    # False when any run has a call of unknown duration
     unknown_duration_calls: int = 0
+    streamed_cost_calls: int = 0
+    unpriced_calls: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {k: (v.to_dict() if isinstance(v, Summary) else v) for k, v in self.__dict__.items()}
@@ -101,7 +103,9 @@ def summarize_efficiency(trajectories: Sequence[Trajectory], effs: Sequence[Effi
         wall_clock_s=S(e.wall_clock_s for e in effs), agent_time_s=S(e.agent_time_s for e in effs),
         waiting_time_s=S(e.waiting_time_s for e in effs), errors=S(e.errors for e in effs), per_agent=per_agent,
         duration_complete=all(e.duration_complete for e in effs),
-        unknown_duration_calls=sum(e.unknown_duration_calls for e in effs))
+        unknown_duration_calls=sum(e.unknown_duration_calls for e in effs),
+        streamed_cost_calls=sum(e.streamed_cost_calls for e in effs),
+        unpriced_calls=sum(e.unpriced_calls for e in effs))
 
 
 class EvaluationResult:

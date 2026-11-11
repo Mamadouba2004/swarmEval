@@ -279,6 +279,35 @@ def test_bare_streamed_call_marks_durations_incomplete():
     assert page.count("durations incomplete") == 2
 
 
+def mixed_cost_swarm(stream=True, unpriced=True):
+    _, client = streaming_client()
+
+    def swarm(task, ctx):
+        with ctx.agent("a") as a:
+            if stream:
+                client.messages.create(model="claude-sonnet-5", messages=[{"role": "user", "content": "x"}],
+                                       stream=True)
+            if unpriced:
+                with a.llm_call(model="no-such-model") as call:
+                    call.input_tokens, call.output_tokens = 10, 5
+        return "42"
+    return swarm
+
+
+@pytest.mark.parametrize("stream, unpriced", [(True, False), (False, True), (True, True)])
+def test_cost_note_names_the_cause_of_each_unknown_cost(stream, unpriced):
+    """PR #8 review round 5: a run whose only unknown costs were streams was told
+    to add pricing entries and re-price, which cannot help."""
+    res = evaluate(mixed_cost_swarm(stream, unpriced), five_tasks(), clock_factory=SimClock)
+    assert res.efficiency.cost_complete is False
+    report, page = res.report(), render_html(res)
+    streamed = "cost incomplete: 5 streamed call(s) have no usage, so their cost is unknown"
+    for doc in (report, page):
+        assert (streamed in doc) == stream
+        assert ("no pricing entry" in doc) == unpriced
+        assert ("--pricing" in doc) == unpriced
+
+
 def test_run_without_streams_has_complete_durations():
     res = evaluate(streamed_swarm(stream=False), five_tasks(), clock_factory=SimClock)
     assert res.efficiency.duration_complete is True and res.efficiency.unknown_duration_calls == 0
