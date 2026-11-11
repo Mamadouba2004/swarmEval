@@ -3,18 +3,25 @@
 Phase 1 reports what was directly recorded: token usage, call counts, cost,
 wall clock time and per-agent time.  Critical path and parallelism need the
 execution graph and live in ``metrics/dependency.py`` (Phase 2).
+
+One exception counts as one error: ERROR events and failed calls marked ``propagated`` (an already-counted
+exception passing through enclosing spans or a tool calling a tool) stay in the trajectory but are not
+re-counted. Agents are ordered by first start, then id, because event order varies under concurrency.
+
+An unknown cost has one of two causes, counted separately: ``streamed_cost_calls`` (a stream has no usage) and
+``unpriced_calls`` (the model has no pricing entry). ``duration_complete`` is False and
+``unknown_duration_calls`` counts the calls when a call's duration is unknown (a bare stream).
 """
 from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from typing import Dict, List, Optional, Tuple
 
 from ..pricing import PricingTable
 from ..schema import EventType, Trajectory
 
 
-def union_length(intervals: List[Tuple[float, float]]) -> float:
+def union_length(intervals: list[tuple[float, float]]) -> float:
     """Total length covered by a set of possibly overlapping intervals."""
     ivs = sorted((a, b) for a, b in intervals if b > a)
     total = 0.0
@@ -35,7 +42,7 @@ def union_length(intervals: List[Tuple[float, float]]) -> float:
 @dataclass
 class AgentEfficiency:
     agent_id: str
-    role: Optional[str] = None
+    role: str | None = None
     spans: int = 0
     llm_calls: int = 0
     tool_calls: int = 0
@@ -43,18 +50,20 @@ class AgentEfficiency:
     artifacts_produced: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    cost_usd: Optional[float] = None
+    cost_usd: float | None = None
     cost_complete: bool = True
-    self_time_s: float = 0.0     # span time excluding nested child agents
-    busy_time_s: float = 0.0     # time inside own llm/tool calls
-    idle_time_s: float = 0.0     # self time not spent in calls (waiting)
+    self_time_s: float = 0.0
+    busy_time_s: float = 0.0
+    idle_time_s: float = 0.0
     errors: int = 0
 
     @property
     def total_tokens(self) -> int:
+        """Prompt plus output tokens."""
         return self.input_tokens + self.output_tokens
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
+        """The record as a JSON-ready dict."""
         d = asdict(self)
         d["total_tokens"] = self.total_tokens
         return d
@@ -69,27 +78,28 @@ class EfficiencyMetrics:
     tool_calls: int = 0
     messages: int = 0
     message_tokens: int = 0
-    cost_usd: Optional[float] = None
+    cost_usd: float | None = None
     cost_complete: bool = True
-    duration_complete: bool = True  # False when a call's duration is unknown (a bare stream)
+    duration_complete: bool = True
     unknown_duration_calls: int = 0
-    streamed_cost_calls: int = 0     # unknown cost because a stream has no usage
-    unpriced_calls: int = 0          # unknown cost because the model has no pricing entry
+    streamed_cost_calls: int = 0
+    unpriced_calls: int = 0
     wall_clock_s: float = 0.0
-    agent_time_s: float = 0.0     # sum of agent self time (aggregate work)
+    agent_time_s: float = 0.0
     llm_latency_s: float = 0.0
     tool_latency_s: float = 0.0
     waiting_time_s: float = 0.0
     errors: int = 0
-    per_agent: Dict[str, AgentEfficiency] = field(default_factory=dict)
+    per_agent: dict[str, AgentEfficiency] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
+        """The metrics as a JSON-ready dict."""
         d = asdict(self)
         d["per_agent"] = {k: v.to_dict() for k, v in self.per_agent.items()}
         return d
 
 
-def event_cost(ev, pricing: Optional[PricingTable]) -> Optional[float]:
+def event_cost(ev, pricing: PricingTable | None) -> float | None:
     """Cost of an LLM_CALL event: re-priced from its model and tokens when a
     pricing table is given, else the cost recorded at run time."""
     if pricing is None or ev.metadata.get("cost_unknown"):
@@ -97,19 +107,18 @@ def event_cost(ev, pricing: Optional[PricingTable]) -> Optional[float]:
     return pricing.cost(ev.model, ev.input_tokens, ev.output_tokens, ev.cache_read_tokens, ev.cache_write_tokens)
 
 
-def compute_efficiency(traj: Trajectory, pricing: Optional[PricingTable] = None) -> EfficiencyMetrics:
-    """Efficiency of one run.  ``cost_usd`` is ``None`` when no LLM call could
-    be priced (never a silent zero); ``cost_complete`` is False when any call
-    is unpriced."""
+def compute_efficiency(traj: Trajectory, pricing: PricingTable | None = None) -> EfficiencyMetrics:
+    """Efficiency of one run; ``cost_usd`` is ``None`` when no call could be priced, never a silent zero,
+    and ``cost_complete`` is False when any call is unpriced."""
     m = EfficiencyMetrics()
-    per: Dict[str, AgentEfficiency] = {}
+    per: dict[str, AgentEfficiency] = {}
 
     def agent(aid: str) -> AgentEfficiency:
         if aid not in per:
             per[aid] = AgentEfficiency(aid)
         return per[aid]
 
-    busy: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
+    busy: dict[str, list[tuple[float, float]]] = defaultdict(list)
     for ev in traj.events:
         if ev.event_type == EventType.LLM_CALL.value:
             cost = event_cost(ev, pricing)
@@ -140,8 +149,6 @@ def compute_efficiency(traj: Trajectory, pricing: Optional[PricingTable] = None)
                 else:
                     a.cost_usd = (a.cost_usd or 0.0) + cost
             if ev.status == "error" and not ev.metadata.get("propagated"):
-                # a failed call that an already-counted exception passed through
-                # (a tool calling a tool) stays visibly failed but is not re-counted
                 m.errors += 1
                 if ev.agent_id:
                     agent(ev.agent_id).errors += 1
@@ -153,8 +160,6 @@ def compute_efficiency(traj: Trajectory, pricing: Optional[PricingTable] = None)
             if ev.agent_id:
                 agent(ev.agent_id).tool_calls += 1
             if ev.status == "error" and not ev.metadata.get("propagated"):
-                # a failed call that an already-counted exception passed through
-                # (a tool calling a tool) stays visibly failed but is not re-counted
                 m.errors += 1
                 if ev.agent_id:
                     agent(ev.agent_id).errors += 1
@@ -166,16 +171,14 @@ def compute_efficiency(traj: Trajectory, pricing: Optional[PricingTable] = None)
         elif ev.event_type == EventType.ARTIFACT.value and ev.agent_id:
             agent(ev.agent_id).artifacts_produced += 1
         elif ev.event_type == EventType.ERROR.value and not ev.metadata.get("propagated"):
-            # an exception leaving enclosing spans / the run is the same failure
             m.errors += 1
             if ev.agent_id and ev.span_id:
                 agent(ev.agent_id).errors += 1
     m.total_tokens = m.input_tokens + m.output_tokens
     if m.llm_calls == 0:
-        m.cost_usd = 0.0  # nothing to pay for (matches Trajectory.cost_usd)
+        m.cost_usd = 0.0
 
-    # span-based timing
-    children: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
+    children: dict[str, list[tuple[float, float]]] = defaultdict(list)
     for s in traj.spans.values():
         if s.parent_span_id and s.end is not None:
             children[s.parent_span_id].append((s.start, s.end))
@@ -191,8 +194,6 @@ def compute_efficiency(traj: Trajectory, pricing: Optional[PricingTable] = None)
         a.self_time_s += self_time
         a.busy_time_s += busy_time
         a.idle_time_s += max(0.0, self_time - busy_time)
-    # Stable agent order (first start, then id): event order varies between
-    # runs when agents work concurrently.
     first = {aid: min((s.start for s in traj.spans.values() if s.agent_id == aid), default=float("inf"))
              for aid in per}
     m.per_agent = {aid: per[aid] for aid in sorted(per, key=lambda a: (first[a], a))}

@@ -7,8 +7,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from swarmeval import (Benchmark, LLMResult, RunContext, SimClock, Swarm, Task, analyze_runs, compute_efficiency,
-                       evaluate, evaluators as E)
+from swarmeval import (
+    Benchmark,
+    LLMResult,
+    RunContext,
+    SimClock,
+    Swarm,
+    Task,
+    analyze_runs,
+    compute_efficiency,
+    evaluate,
+)
+from swarmeval import evaluators as E
 from swarmeval.cli import main
 from swarmeval.integrations.anthropic import anthropic_llm, instrument_client
 from swarmeval.pricing import PricingTable
@@ -25,7 +35,6 @@ def ctx_for(**kw):
     return ctx
 
 
-# -- cost ------------------------------------------------------------------- #
 def test_unknown_cost_is_never_reported_as_zero():
     def swarm(task, ctx):
         with ctx.agent("local", model="llama-3-70b") as a:
@@ -57,7 +66,7 @@ def test_partial_cost_is_marked_in_every_row():
 
 def test_saved_runs_can_be_repriced(tmp_path):
     def swarm(task, ctx):
-        with ctx.agent("a", model="acme-llm-1") as a:   # not in DEFAULT_PRICES
+        with ctx.agent("a", model="acme-llm-1") as a:
             a.llm(lambda: LLMResult("x", 200_000, 20_000))
         return "ok"
 
@@ -75,7 +84,7 @@ def test_saved_runs_can_be_repriced(tmp_path):
 def test_pricing_lookup_does_not_borrow_another_models_price():
     p = PricingTable()
     assert p.lookup("claude-opus-5-5") == (4.0, 20.0, 0.2)
-    assert p.lookup("claude-opus-5-9") is None                       # unknown, not claude-opus-5
+    assert p.lookup("claude-opus-5-9") is None
     assert p.lookup("claude-opus-5-20260101") == p.lookup("claude-opus-5")
     assert p.lookup("anthropic/claude-opus-5") == p.lookup("claude-opus-5")
     assert p.lookup("us.anthropic.claude-haiku-4-5-v1:0") == p.lookup("claude-haiku-4-5")
@@ -84,19 +93,15 @@ def test_pricing_lookup_does_not_borrow_another_models_price():
 
 def test_prompt_cache_tokens_are_priced():
     p = PricingTable()
-    # sonnet-5: $2 in, $10 out; reads 0.1x, writes 1.25x
     assert p.cost("claude-sonnet-5", 100, 10, cache_read_tokens=1000, cache_write_tokens=1000) == pytest.approx(
         (100 * 2 + 10 * 10 + 1000 * 0.2 + 1000 * 2.5) / 1e6)
-    # models with their own cache-read rate (official pricing page)
     assert p.cost("claude-opus-5-5", 0, 0, cache_read_tokens=1_000_000) == pytest.approx(0.20)
     assert p.cost("claude-sonnet-5-5", 0, 0, cache_read_tokens=1_000_000) == pytest.approx(0.10)
     assert p.cost("claude-fable-5-1", 0, 0, cache_read_tokens=1_000_000) == pytest.approx(0.25)
-    # dated ids of older models resolve to the undated key
     assert p.lookup("claude-opus-4-1-20250805") == (15.0, 75.0)
     assert p.lookup("claude-3-5-haiku-20241022") == (0.8, 4.0)
 
 
-# -- evaluator specs -------------------------------------------------------- #
 @pytest.mark.parametrize("spec", [{"type": "contains"}, {"type": "regex"}, {"type": "contains_all", "keyword": ["a"]},
                                   {"type": "contains_all"}, {"type": "exact_match"}, {"type": "regex", "pattern": "("}])
 def test_bad_evaluator_specs_fail_before_any_run(spec):
@@ -129,7 +134,7 @@ def test_unserializable_evaluators_fail_clearly(tmp_path):
     target = tmp_path / "bench.json"
     with pytest.raises(ValueError, match="cannot be rebuilt"):
         bench.save(str(target))
-    assert not target.exists()  # refused before writing anything
+    assert not target.exists()
     reloaded = Benchmark.from_dict(json.loads(json.dumps(bench.to_dict())))
     with pytest.raises(ValueError, match="cannot be rebuilt"):
         reloaded.validate()
@@ -172,7 +177,6 @@ def test_tool_use_flags_forbidden_tool_even_when_it_failed():
     assert not r.success and r.details["forbidden"] == ["rm_rf"]
 
 
-
 def test_tool_use_counts_an_exception_through_nested_calls_once():
     ctx = ctx_for()
     with ctx.agent("a") as a:
@@ -183,7 +187,6 @@ def test_tool_use_counts_an_exception_through_nested_calls_once():
     r = E.ToolUseEvaluator().evaluate(Task("t", "q"), "out", traj)
     assert not r.success and r.details["errors"] == 1
 
-# -- runner ----------------------------------------------------------------- #
 def test_swarm_class_is_accepted_as_factory():
     class S(Swarm):
         def run(self, task, ctx):
@@ -229,7 +232,6 @@ def test_async_swarm_inside_running_loop_raises_instead_of_recording_a_crash():
     with pytest.raises(UsageError, match="running event loop"):
         asyncio.run(outer())
 
-    # the same when run() is sync but hands back a coroutine
     async def body():
         return "42"
 
@@ -252,7 +254,6 @@ def test_sync_wrappers_reject_async_functions():
             a.call_tool("t", model, "p")
 
 
-# -- recorder --------------------------------------------------------------- #
 def test_events_from_plain_threads_are_attributed_to_their_span():
     ctx = ctx_for()
     with ctx.agent("coord") as coord:
@@ -352,7 +353,7 @@ def test_exception_through_nested_tool_calls_counts_once():
     res = evaluate(swarm, one_task())
     eff = res.per_run[0]
     assert eff.errors == 1 and {k: v.errors for k, v in eff.per_agent.items()} == {"a": 1}
-    inner_ev, outer_ev = res.runs.trajectories[0].tool_calls()   # recorded innermost first
+    inner_ev, outer_ev = res.runs.trajectories[0].tool_calls()
     assert (inner_ev.tool_name, outer_ev.tool_name) == ("inner", "outer")
     assert inner_ev.status == outer_ev.status == "error"
     assert "propagated" not in inner_ev.metadata
@@ -398,7 +399,7 @@ def test_capture_text_off_applies_to_everything_saved():
     res = evaluate(swarm, one_task(), capture_text=False)
     saved = json.dumps(res.runs.to_dict())
     assert secret not in saved
-    assert res.runs.trajectories[0].final_output == secret  # still complete in memory
+    assert res.runs.trajectories[0].final_output == secret
 
 
 def test_max_text_chars_applies_to_non_strings():
@@ -409,7 +410,6 @@ def test_max_text_chars_applies_to_non_strings():
     assert len(ctx.finish().tool_calls()[0].content) < 200
 
 
-# -- Anthropic adapter ------------------------------------------------------ #
 def fake_response(tin=1000, tout=200, cr=0, cw=0):
     usage = SimpleNamespace(input_tokens=tin, output_tokens=tout, cache_read_input_tokens=cr,
                             cache_creation_input_tokens=cw)
@@ -457,7 +457,6 @@ def test_instrumented_async_client_records_real_usage():
     assert (ev.input_tokens, ev.output_tokens) == (1000, 200) and ev.cost_usd > 0
 
 
-# -- CLI / export ----------------------------------------------------------- #
 def test_report_on_summary_only_result_is_an_error(tmp_path):
     res = evaluate(lambda task, ctx: "x", one_task())
     path = tmp_path / "summary.json"

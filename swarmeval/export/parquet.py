@@ -7,7 +7,8 @@ as JSON strings so every column has a single type.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Iterable, List, Union
+from collections.abc import Iterable
+from typing import Any
 
 from ..schema import Event, Trajectory
 
@@ -15,6 +16,7 @@ _JSON_COLUMNS = ("content", "tool_args", "metadata", "input_artifacts", "output_
 
 
 def _pyarrow():
+    """Import pyarrow, explaining how to install it if missing."""
     try:
         import pyarrow  # noqa: F401
         import pyarrow.parquet  # noqa: F401
@@ -25,14 +27,16 @@ def _pyarrow():
     return pa, pq
 
 
-def _row(ev: Event) -> Dict[str, Any]:
+def _row(ev: Event) -> dict[str, Any]:
+    """One event as a Parquet row, with variable-type fields as JSON strings."""
     d = ev.to_dict()
     for k in _JSON_COLUMNS:
         d[k] = json.dumps(d[k], default=str) if d[k] is not None else None
     return d
 
 
-def write_events_parquet(source: Union[Trajectory, Iterable[Trajectory]], path: str) -> int:
+def write_events_parquet(source: Trajectory | Iterable[Trajectory], path: str) -> int:
+    """Write every event as one Parquet row; returns the number written."""
     pa, pq = _pyarrow()
     trajs = [source] if isinstance(source, Trajectory) else list(source)
     rows = [_row(ev) for t in trajs for ev in t.events]
@@ -42,9 +46,10 @@ def write_events_parquet(source: Union[Trajectory, Iterable[Trajectory]], path: 
     return len(rows)
 
 
-def read_events_parquet(path: str) -> List[Event]:
+def read_events_parquet(path: str) -> list[Event]:
+    """Read events from a Parquet file written by ``write_events_parquet``."""
     _, pq = _pyarrow()
-    out: List[Event] = []
+    out: list[Event] = []
     for d in pq.read_table(path).to_pylist():
         for k in _JSON_COLUMNS:
             if isinstance(d.get(k), str):

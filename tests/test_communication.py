@@ -28,8 +28,8 @@ def test_attached_artifact_tokens_counted_once():
     ctx = make_ctx()
     with ctx.agent("a") as a:
         llm(a, ctx.clock, tokens=(100, 50))
-        art = a.produce("big", "x" * 4000)            # 1000 tokens
-        a.send("b", "y" * 20, kind="result", artifacts=[art])   # 5-token body
+        art = a.produce("big", "x" * 4000)
+        a.send("b", "y" * 20, kind="result", artifacts=[art])
     with ctx.agent("b") as b:
         b.receive()
         llm(b, ctx.clock, tokens=(40, 10))
@@ -67,12 +67,12 @@ def test_kind_split_repeats_and_broadcasts():
     with ctx.agent("lead") as lead:
         lead.send("w1", "start on part one", kind="task_assignment")
         lead.send("w1", "status?", kind="coordination")
-        lead.send("w1", "status?", kind="coordination")       # repeat: same sender, receiver, content
+        lead.send("w1", "status?", kind="coordination")
         lead.send("w2", "where is it?", kind="request")
         lead.send("w2", "fyi the deadline moved", kind="information")
-        lead.send("w3", "fyi the deadline moved", kind="information")   # broadcast with the one above
+        lead.send("w3", "fyi the deadline moved", kind="information")
         lead.send("w1", "nice work", kind="feedback")
-        lead.send("w1", "misc", kind="chatter")                 # unknown kind -> other
+        lead.send("w1", "misc", kind="chatter")
     with ctx.agent("w1") as w1:
         w1.send("lead", "part one done", kind="result")
     cm = compute_communication(ctx.finish())
@@ -88,7 +88,7 @@ def test_same_text_sent_outside_spans_is_not_one_broadcast():
     ctx = make_ctx()
     ctx.send("lead", "w1", "ping")
     ctx.clock.advance(5.0)
-    ctx.send("lead", "w2", "ping")             # later, unrelated: no span ties the two together
+    ctx.send("lead", "w2", "ping")
     cm = compute_communication(ctx.finish())
     assert cm.broadcasts == 0 and cm.broadcast_messages == 0
 
@@ -129,9 +129,8 @@ def test_star_topology_hub_share_and_relay():
     assert cm.hub_agent == "hub" and cm.hub_share == 1.0
     assert cm.per_agent["hub"].relayed_messages == 1
     assert cm.per_agent["hub"].relay_fraction == pytest.approx(1 / 4)
-    assert cm.per_agent["a"].relay_fraction == 0.0          # sent its own artifact
-    assert cm.per_agent["c"].relay_fraction is None         # sent nothing
-    # a -> b through artifact consumption counts towards fan-out/in
+    assert cm.per_agent["a"].relay_fraction == 0.0
+    assert cm.per_agent["c"].relay_fraction is None
     assert cm.per_agent["a"].fan_out == 2 and cm.per_agent["b"].fan_in == 2
     assert cm.receive_delay_mean_s is not None and cm.receive_delay_max_s >= cm.receive_delay_mean_s
 
@@ -140,9 +139,9 @@ def test_used_edge_ratio_and_inferred():
     ctx = make_ctx()
     with ctx.agent("a") as a:
         art = a.produce("notes", "facts", derived_from=[])
-        a.send("b", "use these", artifacts=[art])          # used: b consumes the artifact
-        a.send("c", "ignore me", artifacts=[art])          # delivered, artifact never used
-        a.send("b", "plain text")                          # no artifact: used by timing (inferred)
+        a.send("b", "use these", artifacts=[art])
+        a.send("c", "ignore me", artifacts=[art])
+        a.send("b", "plain text")
     with ctx.agent("b") as b:
         b.receive()
         b.consume(art)
@@ -155,27 +154,22 @@ def test_used_edge_ratio_and_inferred():
 
 
 def test_demo_communication():
-    """Demo: 9 messages, all to or from the coordinator (hub share 1.0); the
-    coordinator relays the researchers' notes to the critic and the synthesizer
-    (2 of its 5 messages); researcher_c's result is the one message nobody uses.
-    The three task assignments carry no artifact, so their use is inferred."""
+    """Demo: 9 messages all via the coordinator, 2 of its 5 relaying notes; researcher_c's result goes unused
+    and the three artifact-free task assignments have their use inferred."""
     res = evaluate(make_swarm, build_benchmark(2), trials=3, clock_factory=SimClock)
-    for traj, cm in zip(res.runs.trajectories, res.per_run_coordination):
+    for traj, cm in zip(res.runs.trajectories, res.per_run_coordination, strict=True):
         c = cm.communication
         assert c.messages == 9 and c.hub_agent == "coordinator" and c.hub_share == 1.0
         assert {k: v["messages"] for k, v in c.by_category.items()} == {
             "coordination": 5, "information": 0, "work_product": 4, "other": 0}
         assert c.per_agent["coordinator"].relay_fraction == pytest.approx(2 / 5)
         assert c.used_messages == 8 and c.used_edge_ratio == pytest.approx(8 / 9) and c.used_inferred == 3
-        # researcher_a and researcher_c get the identical assignment (same
-        # scope) from one coordinator span: one broadcast of two messages
         assert c.repeated_messages == 0 and c.broadcasts == 1 and c.broadcast_messages == 2
-        # by hand: message bodies over LLM prompt+output tokens
         body = sum(max(0, m.content_tokens - sum(traj.artifacts[a].tokens for a in m.input_artifacts))
                    for m in traj.messages())
         work = sum(e.input_tokens + e.output_tokens for e in traj.llm_calls())
         assert c.comm_work_ratio == pytest.approx(body / work)
-        assert 0.01 < c.comm_work_ratio < 0.02     # bodies are small; the relayed notes ride as artifacts
+        assert 0.01 < c.comm_work_ratio < 0.02
     s = summarize_communication([cm.communication for cm in res.per_run_coordination])
     assert s.hub_agents == {"coordinator": 6} and s.hub_share.mean == 1.0
     assert res.coordination.communication.comm_work_ratio.n == 6
@@ -185,7 +179,7 @@ def test_demo_communication():
 def test_graph_and_communication_fan_agree_on_invocation_only_edge():
     ctx = make_ctx()
     with ctx.agent("a") as a:
-        with a.sub_agent("b"):                              # a invokes b; no message, no artifact
+        with a.sub_agent("b"):
             pass
     traj = ctx.finish()
     g = build_graph(traj)

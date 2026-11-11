@@ -19,7 +19,8 @@ DOT with ``dot -Tsvg``.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from .builder import ExecutionGraph
 
@@ -31,12 +32,14 @@ _CALL_KINDS = ("llm", "tool")
 
 
 def _check_view(view: str) -> None:
+    """Raise ValueError for an unknown graph view."""
     if view not in VIEWS:
         raise ValueError(f"unknown graph view {view!r}; known: {list(VIEWS)}")
 
 
-def _agent_info(graph: ExecutionGraph, cm: Optional["CoordinationMetrics"]) -> Dict[str, Dict[str, Any]]:
-    info: Dict[str, Dict[str, Any]] = {}
+def _agent_info(graph: ExecutionGraph, cm: CoordinationMetrics | None) -> dict[str, dict[str, Any]]:
+    """Per-agent token share and contribution status used to label agent nodes."""
+    info: dict[str, dict[str, Any]] = {}
     for a in graph.agents:
         u = cm.utilization.get(a) if cm is not None else None
         c = cm.contribution.get(a) if cm is not None else None
@@ -45,11 +48,10 @@ def _agent_info(graph: ExecutionGraph, cm: Optional["CoordinationMetrics"]) -> D
     return info
 
 
-def _inferred(graph: ExecutionGraph) -> Dict[Any, int]:
-    """(source, target, kind) -> how many of the edge's messages had their
-    *delivery* inferred (no receive event).  Use judged by timing alone does
-    not make the edge itself inferred: the message was recorded arriving."""
-    out: Dict[Any, int] = {}
+def _inferred(graph: ExecutionGraph) -> dict[Any, int]:
+    """Map (source, target, kind) to how many of the edge's messages had their delivery inferred.
+    Use judged by timing alone does not make the edge inferred."""
+    out: dict[Any, int] = {}
     for m in graph.messages:
         if not m.received and m.sender is not None and m.receiver is not None:
             k = (m.sender, m.receiver, "message")
@@ -57,13 +59,15 @@ def _inferred(graph: ExecutionGraph) -> Dict[Any, int]:
     return out
 
 
-def _cp_nodes(cm: Optional["CoordinationMetrics"]) -> Set[str]:
+def _cp_nodes(cm: CoordinationMetrics | None) -> set[str]:
+    """Ids of the units on the critical path, empty without dependency analysis."""
     if cm is None or cm.dependency is None:
         return set()
     return set(cm.dependency.critical_path.node_ids)
 
 
 def _edge_label(kind: str, count: int, tokens: int, inferred: int) -> str:
+    """Label of an agent edge: kind, count, tokens and inferred count."""
     label = f"{kind} ×{count}"
     if tokens:
         label += f" · {tokens:,} tok"
@@ -73,6 +77,7 @@ def _edge_label(kind: str, count: int, tokens: int, inferred: int) -> str:
 
 
 def _unit_label(u: Any) -> str:
+    """Label of a DAG unit: its kind and duration."""
     if u.kind in _CALL_KINDS:
         return f"{u.kind} {u.weight:.1f}s"
     if u.kind == "wait":
@@ -80,19 +85,18 @@ def _unit_label(u: Any) -> str:
     return u.kind
 
 
-# --------------------------------------------------------------------------- #
-# Mermaid
-# --------------------------------------------------------------------------- #
 _MERMAID_ESC = {"&": "&amp;", '"': "#quot;", "<": "&lt;", ">": "&gt;", "[": "#91;", "]": "#93;",
                 "{": "#123;", "}": "#125;", "|": "#124;", "`": "#96;", "\n": " ", "\r": " "}
 
 
 def mermaid_escape(text: str) -> str:
+    """Escape text for a Mermaid label."""
     return "".join(_MERMAID_ESC.get(ch, ch) for ch in str(text))
 
 
 def to_mermaid(graph: ExecutionGraph, view: str = "agents",
-               coordination: Optional["CoordinationMetrics"] = None) -> str:
+               coordination: CoordinationMetrics | None = None) -> str:
+    """The agent graph or work-unit DAG as a Mermaid flowchart."""
     _check_view(view)
     lines = ["flowchart LR" if view == "agents" else "flowchart TB"]
     if view == "agents":
@@ -135,19 +139,16 @@ def to_mermaid(graph: ExecutionGraph, view: str = "agents",
     return "\n".join(lines) + "\n"
 
 
-# --------------------------------------------------------------------------- #
-# DOT
-# --------------------------------------------------------------------------- #
 def dot_escape(text: str) -> str:
-    """Body of a double-quoted DOT string: backslashes and quotes escaped,
-    line breaks as ``\\n``, angle brackets as entities so nothing reads as
-    markup in an SVG viewer."""
+    """Escape text for a double-quoted DOT string: backslashes, quotes and line breaks,
+    with angle brackets as entities so nothing reads as SVG markup."""
     out = str(text).replace("\\", "\\\\").replace('"', '\\"').replace("\r", "").replace("\n", "\\n")
     return out.replace("<", "&lt;").replace(">", "&gt;")
 
 
 def to_dot(graph: ExecutionGraph, view: str = "agents",
-           coordination: Optional["CoordinationMetrics"] = None) -> str:
+           coordination: CoordinationMetrics | None = None) -> str:
+    """The agent graph or work-unit DAG in Graphviz DOT."""
     _check_view(view)
     name = dot_escape(f"{graph.run_id} {view}")
     lines = [f'digraph "{name}" {{', "    rankdir=LR;" if view == "agents" else "    rankdir=TB;",
@@ -195,16 +196,14 @@ def to_dot(graph: ExecutionGraph, view: str = "agents",
     return "\n".join(lines) + "\n"
 
 
-# --------------------------------------------------------------------------- #
-# JSON
-# --------------------------------------------------------------------------- #
 def to_json(graph: ExecutionGraph, view: str = "agents",
-            coordination: Optional["CoordinationMetrics"] = None) -> str:
+            coordination: CoordinationMetrics | None = None) -> str:
+    """The agent graph or work-unit DAG as JSON."""
     _check_view(view)
     if view == "agents":
         info = _agent_info(graph, coordination)
         inferred = _inferred(graph)
-        d: Dict[str, Any] = {
+        d: dict[str, Any] = {
             "run_id": graph.run_id, "view": view,
             "nodes": [{"id": a, **info[a]} for a in graph.agents],
             "edges": [dict(e.to_dict(), delivery_inferred=inferred.get((e.source, e.target, e.kind), 0))
@@ -222,15 +221,16 @@ def to_json(graph: ExecutionGraph, view: str = "agents",
     return json.dumps(d, indent=1, sort_keys=True, default=str) + "\n"
 
 
-GRAPH_FORMATS: Dict[str, Callable[..., str]] = {"mermaid": to_mermaid, "dot": to_dot, "json": to_json}
+GRAPH_FORMATS: dict[str, Callable[..., str]] = {"mermaid": to_mermaid, "dot": to_dot, "json": to_json}
 
 
 def export_graph(graph: ExecutionGraph, fmt: str = "mermaid", view: str = "agents",
-                 coordination: Optional["CoordinationMetrics"] = None) -> str:
+                 coordination: CoordinationMetrics | None = None) -> str:
+    """The graph in ``fmt`` (mermaid, dot or json) for the given view."""
     if fmt not in GRAPH_FORMATS:
         raise ValueError(f"unknown graph format {fmt!r}; known: {sorted(GRAPH_FORMATS)}")
     return GRAPH_FORMATS[fmt](graph, view=view, coordination=coordination)
 
 
-__all__: List[str] = ["GRAPH_FORMATS", "VIEWS", "export_graph", "to_mermaid", "to_dot", "to_json",
+__all__: list[str] = ["GRAPH_FORMATS", "VIEWS", "export_graph", "to_mermaid", "to_dot", "to_json",
                       "mermaid_escape", "dot_escape"]

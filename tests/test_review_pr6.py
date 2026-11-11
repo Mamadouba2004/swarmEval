@@ -7,7 +7,6 @@ from swarmeval import SimClock, build_graph, evaluate
 from swarmeval.examples.research_swarm import build_benchmark, make_swarm
 from swarmeval.report.html import _NODE_H, _NODE_W, _first_start, _layout, graph_svg
 
-# M x1,y1 Q qx,qy x2,y2 ... <title>source → target: ...
 EDGE = re.compile(r'd="M([\d.-]+),([\d.-]+) Q([\d.-]+),([\d.-]+) ([\d.-]+),([\d.-]+)"[^>]*><title>([^<]+?) → ([^:<]+):')
 
 
@@ -21,7 +20,7 @@ def test_edges_do_not_pass_through_other_agents():
     for m in edges:
         x1, y1, qx, qy, x2, y2 = map(float, m.groups()[:6])
         src, dst = html.unescape(m.group(7)), html.unescape(m.group(8))
-        for t in (i / 50 for i in range(1, 50)):  # points on the quadratic curve, endpoints excluded
+        for t in (i / 50 for i in range(1, 50)):
             px = (1 - t) ** 2 * x1 + 2 * (1 - t) * t * qx + t * t * x2
             py = (1 - t) ** 2 * y1 + 2 * (1 - t) * t * qy + t * t * y2
             for a, (nx, ny) in pos.items():

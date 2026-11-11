@@ -15,21 +15,42 @@ Quick start::
     print(result.report())
 """
 from . import evaluators
+from .compare import Comparison, compare
+from .diagnostics import (
+                      Diagnostic,
+                      DiagnosticsReport,
+                      SmellConfig,
+                      SmellPrevalence,
+                      detect_smells,
+                      load_smell_config,
+                      summarize_diagnostics,
+)
 from .evaluate import AnalysisFailed, EfficiencySummary, EvaluationResult, analyze_runs, evaluate
+from .export import read_events_jsonl, write_events_jsonl
+from .graph import ExecutionGraph, build_graph, export_graph, to_dot, to_json, to_mermaid
+from .metrics import (
+                      CommunicationMetrics,
+                      ContextMetrics,
+                      CoordinationMetrics,
+                      CoordinationSummary,
+                      DependencyMetrics,
+                      EfficiencyMetrics,
+                      PerformanceMetrics,
+                      RedundancyMetrics,
+                      compute_communication,
+                      compute_context,
+                      compute_coordination,
+                      compute_dependency,
+                      compute_efficiency,
+                      compute_performance,
+                      compute_redundancy,
+                      summarize_coordination,
+)
 from .recorder import AgentSpan, LLMCall, LLMResult, Message, RunContext, SimClock, ToolCall, WallClock
+from .report import render_comparison, render_coordination, render_html, render_text, render_trajectory
 from .runner import FunctionSwarm, RunInterrupted, RunOptions, RunSet, Swarm, SwarmRunner
 from .schema import Artifact, Benchmark, Evaluation, Event, EventType, Span, Task, Trajectory
-from .metrics import (CommunicationMetrics, ContextMetrics, CoordinationMetrics, CoordinationSummary,
-                      DependencyMetrics, EfficiencyMetrics, PerformanceMetrics, RedundancyMetrics,
-                      compute_communication, compute_context, compute_coordination, compute_dependency,
-                      compute_efficiency, compute_performance, compute_redundancy, summarize_coordination)
-from .diagnostics import (Diagnostic, DiagnosticsReport, SmellConfig, SmellPrevalence, detect_smells,
-                          load_smell_config, summarize_diagnostics)
 from .similarity import EmbeddingSimilarity, LexicalSimilarity, Similarity, resolve_similarity
-from .graph import ExecutionGraph, build_graph, export_graph, to_dot, to_json, to_mermaid
-from .export import read_events_jsonl, write_events_jsonl
-from .report import render_comparison, render_coordination, render_html, render_text, render_trajectory
-from .compare import Comparison, compare
 
 __version__ = "0.1.0"
 

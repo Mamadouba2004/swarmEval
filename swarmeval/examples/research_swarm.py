@@ -13,19 +13,25 @@ to find.  Phase 1 only records and measures it.
 The simulated clock (``SimClock``) is advanced explicitly so runs are instant
 but timings look real; ``ctx.parallel`` gives each researcher its own
 timeline, so their work overlaps under both SimClock and WallClock.
+
+Classes:
+- ResearchSwarm: coordinator -> researchers (parallel) -> coordinator -> critic -> coordinator -> synthesizer
+  ``review_rounds`` > 1 repeats the coordinator <-> critic exchange (each extra round: the coordinator asks for a
+  re-check in reply to the critique, the critic replies again), the back-and-forth that the ``agent_ping_pong``
+  smell looks for. The default of 1 is the original flow.
 """
 from __future__ import annotations
 
 import random
 from functools import partial
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from swarmeval import Benchmark, RunContext, SimClock, Swarm, Task
 from swarmeval.schema import estimate_tokens
 
 MODEL_QUALITY = {"claude-opus-5": 0.985, "claude-sonnet-5": 0.96, "claude-haiku-4-5": 0.85}
-MODEL_SPEED = {"claude-opus-5": 55.0, "claude-sonnet-5": 90.0, "claude-haiku-4-5": 160.0}   # output tok/s
-WRONG_FACT_PICKUP = 0.5   # how often a researcher records the planted wrong fact
+MODEL_SPEED = {"claude-opus-5": 55.0, "claude-sonnet-5": 90.0, "claude-haiku-4-5": 160.0}
+WRONG_FACT_PICKUP = 0.5
 
 TOPICS = [
     ("Aurora protocol", "aurora"), ("Helix compiler", "helix"), ("Quasar storage", "quasar"),
@@ -45,17 +51,18 @@ _FACT_TEMPLATES = [
 _WRONG_TEMPLATE = "{name} was deprecated in {year}"
 
 
-def build_world(n_tasks: int = 8, seed: int = 7) -> Dict[str, Dict[str, Any]]:
+def build_world(n_tasks: int = 8, seed: int = 7) -> dict[str, dict[str, Any]]:
     """Deterministic knowledge base: each task has five sources with facts and
     one planted wrong fact in source s3."""
     rng = random.Random(seed)
-    world: Dict[str, Dict[str, Any]] = {}
+    world: dict[str, dict[str, Any]] = {}
     for i in range(n_tasks):
         name, slug = TOPICS[i % len(TOPICS)]
         year = rng.randint(2012, 2023)
         vals = {"name": name, "year": year, "org": rng.choice(["Tern", "Kestrel", "Ibis", "Heron"]),
                 "ver": f"{rng.randint(1, 5)}.{rng.randint(0, 9)}",
-                "feature": rng.choice(["streaming replication", "incremental snapshots", "zero-copy IO", "adaptive batching"]),
+                "feature": rng.choice(["streaming replication", "incremental snapshots", "zero-copy IO",
+                                       "adaptive batching"]),
                 "lic": rng.choice(["Apache-2.0", "MIT", "BSD-3", "MPL-2.0"]),
                 "n": rng.choice([12000, 48000, 90000, 250000]),
                 "dep": rng.choice(["libwarp", "zephyrio", "corundum", "nimbus-rt"])}
@@ -93,30 +100,23 @@ def build_benchmark(n_tasks: int = 8) -> Benchmark:
 
 
 class ResearchSwarm(Swarm):
-    """coordinator -> researchers (parallel) -> coordinator -> critic -> coordinator -> synthesizer
-
-    ``review_rounds`` > 1 repeats the coordinator <-> critic exchange (each
-    extra round: the coordinator asks for a re-check in reply to the
-    critique, the critic replies again), the back-and-forth that the
-    ``agent_ping_pong`` smell looks for.  The default of 1 is the original
-    flow."""
 
     def __init__(self, review_rounds: int = 1) -> None:
         if review_rounds < 1:
             raise ValueError("review_rounds must be >= 1")
         self.review_rounds = review_rounds
 
-    # -- simulation helpers ---------------------------------------------------
     @staticmethod
     def _advance(ctx: RunContext, seconds: float) -> None:
+        """Advance the simulated clock, or sleep briefly on a real one."""
         clock = ctx.clock
         if isinstance(clock, SimClock):
             clock.advance(seconds)
         else:
-            clock.sleep(seconds * 0.01)  # real clock: keep demos fast
+            clock.sleep(seconds * 0.01)
 
     def _llm(self, ctx: RunContext, agent, prompt: str, out_tokens: int, extra_context_tokens: int = 0,
-             input_artifacts=(), output: Optional[str] = None) -> str:
+             input_artifacts=(), output: str | None = None) -> str:
         """Simulate one LLM call and record it with realistic token counts and latency."""
         model = agent.model or "claude-sonnet-5"
         in_tokens = estimate_tokens(prompt) + extra_context_tokens
@@ -127,21 +127,22 @@ class ResearchSwarm(Swarm):
             call.output = output if output is not None else f"[{agent.agent_id} output for: {prompt[:60]}]"
         return call.output
 
-    def _search(self, ctx: RunContext, world: Dict[str, Any], query: str) -> List[str]:
+    def _search(self, ctx: RunContext, world: dict[str, Any], query: str) -> list[str]:
+        """Simulated web search: the facts in one source of the task's world."""
         self._advance(ctx, 0.4 + 0.15 * len(query))
         return list(world["sources"].get(query, []))
 
     @staticmethod
     def _quality(agent) -> float:
+        """Chance that an agent on this model keeps a correct fact or catches a wrong one."""
         return MODEL_QUALITY.get(agent.model or "", 0.8)
 
-    # -- main flow ------------------------------------------------------------
     def run(self, task: Task, ctx: RunContext) -> Any:
+        """Plan, research in parallel, review with the critic and write the brief."""
         world = WORLD[task.task_id]
         researchers = ["researcher_a", "researcher_b", "researcher_c"]
         scopes = {"researcher_a": ["s1", "s2"], "researcher_b": ["s3", "s4"], "researcher_c": ["s1", "s2"]}
 
-        # 1. coordinator plans and delegates -------------------------------
         with ctx.agent("coordinator", role="coordinator", model="claude-opus-5") as coord:
             self._llm(ctx, coord, f"Plan the research for: {task.input}", 300,
                       output="Plan: split sources between researchers, verify with critic, synthesize.")
@@ -149,15 +150,14 @@ class ResearchSwarm(Swarm):
                 coord.send(r, f"Research {world['name']}. Cover sources {', '.join(scopes[r])} and report facts.",
                            kind="task_assignment", scope=scopes[r])
 
-        # 2. researchers work in parallel ---------------------------------------
         def research(r: str) -> None:
-            rng = ctx.rng  # per-branch generator: draws do not depend on thread scheduling
+            rng = ctx.rng
             with ctx.agent(r, role="research", model="claude-sonnet-5") as agent:
                 msg = agent.receive()[0]
                 scope = msg.metadata.get("scope", [])
                 q = self._quality(agent)
                 self._llm(ctx, agent, f"Assignment: {msg.content}. Decide search queries.", 120)
-                found: List[str] = []
+                found: list[str] = []
                 for s in scope:
                     hits = agent.call_tool("web_search", partial(self._search, ctx, world), query=s)
                     for fact in hits:
@@ -166,12 +166,11 @@ class ResearchSwarm(Swarm):
                             found.append(fact)
                 notes = "\n".join(found) if found else "No reliable information found."
                 self._llm(ctx, agent, f"Summarise findings:\n{notes}", 350, output=notes)
-                art = agent.produce(f"notes_{r[-1]}", notes, derived_from=[])  # from search results only
+                art = agent.produce(f"notes_{r[-1]}", notes, derived_from=[])
                 agent.send("coordinator", notes, kind="result", artifacts=[art])
 
         ctx.parallel(*(partial(research, r) for r in researchers))
 
-        # 3. coordinator relays notes to the critic ------------------------
         with ctx.agent("coordinator", role="coordinator", model="claude-opus-5") as coord:
             notes_msgs = {m.sender: m for m in coord.receive()}
             chosen = [notes_msgs[a] for a in ("researcher_a", "researcher_b") if a in notes_msgs]
@@ -181,7 +180,6 @@ class ResearchSwarm(Swarm):
                       extra_context_tokens=1800, input_artifacts=arts, output="Forwarding findings to the critic.")
             coord.send("critic", combined, kind="request", artifacts=arts)
 
-        # 4. critic verifies ---------------------------------------------------
         with ctx.agent("critic", role="critic", model="claude-opus-5") as critic:
             msgs = critic.receive()
             arts = [a for m in msgs for a in m.artifacts]
@@ -197,7 +195,6 @@ class ResearchSwarm(Swarm):
             critic.send("coordinator", critique, kind="feedback", artifacts=arts + [critique_art],
                         reply_to=msgs[-1] if msgs else None)
 
-        # 4b. optional extra review rounds (no random draws: round 1 decides what is flagged)
         for rnd in range(2, self.review_rounds + 1):
             with ctx.agent("coordinator", role="coordinator", model="claude-opus-5") as coord:
                 fb = coord.receive()
@@ -215,7 +212,6 @@ class ResearchSwarm(Swarm):
                 critic.send("coordinator", critique, kind="feedback", artifacts=arts + [critique_art],
                             reply_to=req[-1] if req else None)
 
-        # 5. coordinator relays to synthesizer --------------------------------
         with ctx.agent("coordinator", role="coordinator", model="claude-opus-5") as coord:
             msgs = coord.receive()
             arts = [a for m in msgs for a in m.artifacts]
@@ -224,11 +220,10 @@ class ResearchSwarm(Swarm):
                       input_artifacts=arts, output="Handing off to synthesizer.")
             coord.send("synthesizer", content, kind="request", artifacts=arts)
 
-        # 6. synthesizer writes the brief -------------------------------------
         with ctx.agent("synthesizer", role="synthesizer", model="claude-opus-5") as synth:
             msgs = synth.receive()
             arts = [a for m in msgs for a in m.artifacts]
-            gathered: List[str] = []
+            gathered: list[str] = []
             for a in arts:
                 art = synth.consume(a, purpose="synthesis")
                 if art is not None and art.name.startswith("notes"):
@@ -249,6 +244,7 @@ def make_swarm(review_rounds: int = 1) -> ResearchSwarm:
 
 
 def sim_clock() -> SimClock:
+    """A fresh simulated clock, for ``--clock`` and ``clock_factory``."""
     return SimClock()
 
 

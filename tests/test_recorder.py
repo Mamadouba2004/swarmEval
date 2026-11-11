@@ -1,3 +1,4 @@
+"""Tests for the recorder: spans, LLM and tool calls, messages, artifacts, errors and serialization."""
 import threading
 import time
 
@@ -25,7 +26,7 @@ def test_spans_llm_tool_message_artifact_are_recorded():
     with ctx.agent("b", role="writer") as b:
         msgs = b.receive()
         assert len(msgs) == 1 and msgs[0].artifacts == [art.artifact_id]
-        assert b.receive() == []  # mailbox drained
+        assert b.receive() == []
         b.consume(art)
         with b.llm_call(model="claude-opus-5", input_artifacts=[art]) as call:
             ctx.clock.advance(1.5)
@@ -134,7 +135,7 @@ def test_parallel_propagates_span_and_wall_clock_overlaps():
     parent = next(s for s in traj.spans.values() if s.agent_id == "coord")
     assert all(s.parent_span_id == parent.span_id for s in children)
     a, b = sorted(children, key=lambda s: s.start)
-    assert b.start < a.end  # the two workers overlapped in time
+    assert b.start < a.end
 
 
 def test_error_inside_span_is_recorded_and_reraised():

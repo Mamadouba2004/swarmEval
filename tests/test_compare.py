@@ -1,11 +1,12 @@
+"""Tests for run-to-run comparison: metric deltas, paired flips, warnings and the compare CLI."""
 import json
 
 import pytest
 
 from swarmeval import Benchmark, LLMResult, SimClock, Task, compare, evaluate
 from swarmeval.cli import main
-from swarmeval.pricing import PricingTable
 from swarmeval.examples.research_swarm import build_benchmark, make_swarm
+from swarmeval.pricing import PricingTable
 
 
 def bench(ids=("t1", "t2", "t3", "t4"), name="b"):
@@ -98,7 +99,7 @@ def test_cli_compare(tmp_path, capsys):
     base, cand = run("base"), run("cand", solves=("t1",))
     pb, pc, out = tmp_path / "b.json", tmp_path / "c.json", tmp_path / "cmp.json"
     base.save(str(pb))
-    cand.runs.save(str(pc))  # a bare RunSet works too
+    cand.runs.save(str(pc))
     assert main(["compare", str(pb), str(pc), "--out", str(out)]) == 0
     assert "COMPARISON  base → cand" in capsys.readouterr().out
     d = json.loads(out.read_text())

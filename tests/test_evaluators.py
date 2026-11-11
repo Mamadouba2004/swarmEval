@@ -1,6 +1,8 @@
+"""Tests for the deterministic evaluators and their JSON spec round trip."""
 import pytest
 
-from swarmeval import RunContext, SimClock, Task, evaluators as E
+from swarmeval import RunContext, SimClock, Task
+from swarmeval import evaluators as E
 
 
 def T(**kw):
@@ -35,9 +37,10 @@ def test_composite_and_constraints_and_spec_roundtrip():
     ev = E.from_spec(spec)
     assert isinstance(ev, E.Composite)
     assert ev.evaluate(T(), "a b done").success
-    assert not ev.evaluate(T(), "a b").success       # required regex fails
+    assert not ev.evaluate(T(), "a b").success
     assert E.from_spec(ev.to_spec()).evaluate(T(), "a b done").success
-    cons = E.from_spec({"type": "constraints", "checks": [{"type": "regex", "pattern": "x"}, {"type": "regex", "pattern": "y"}]})
+    checks = [{"type": "regex", "pattern": "x"}, {"type": "regex", "pattern": "y"}]
+    cons = E.from_spec({"type": "constraints", "checks": checks})
     assert cons.evaluate(T(), "xy").constraints_passed is True
     assert cons.evaluate(T(), "x").constraints_passed is False
 

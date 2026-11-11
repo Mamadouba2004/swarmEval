@@ -54,7 +54,6 @@ def test_demo_renders_graph_timeline_and_sections(demo_html):
     for smell in ("dead_agent", "coordinator_bottleneck", "context_bloat"):
         assert smell in doc
     assert "Observed:" in doc and "Hypothesis:" in doc and "Test:" in doc
-    # coordination tiles reuse the text-report labels, with their definitions as captions
     assert "Actual Parallelism" in doc and "work ÷ wall" in doc
     assert "Communication / Work" in doc and "message ÷ LLM tokens" in doc
     assert "no overall score" in doc
@@ -159,14 +158,14 @@ def test_cli_run_checked_before_work_and_requires_html(tmp_path, capsys):
 
 def test_trial_label_is_escaped():
     res = _hostile_result()
-    res.runs.trajectories[0].trial = HOSTILE  # a hand-edited run file can carry any JSON value here
+    res.runs.trajectories[0].trial = HOSTILE
     doc = render_html(res)
     assert HOSTILE not in doc and "trial &lt;script&gt;" in doc
 
 
 def hostile_trial_file(tmp_path):
     d = json.loads(open(FIXTURE).read())
-    d["trajectories"][0]["trial"] = HOSTILE        # a hand-edited run file
+    d["trajectories"][0]["trial"] = HOSTILE
     p = tmp_path / "hostile.json"
     p.write_text(json.dumps(d))
     return str(p), d["trajectories"][0]["run_id"]
@@ -186,8 +185,6 @@ def test_cli_report_rejects_non_integer_trial_cleanly(tmp_path):
 
 
 def test_timeline_tooltips_escape_recorded_strings():
-    # Coverage-only regression test: these already pass; they pin the escaping
-    # of model, tool name, sender and message kind in timeline tooltips.
     def run(task, ctx):
         with ctx.agent("worker") as w:
             with w.llm_call(model=HOSTILE + "m", input_tokens=1, output_tokens=1):
@@ -213,7 +210,7 @@ def test_edge_tooltip_does_not_double_count_undelivered_messages():
                 ctx.clock.sleep(1.0)
         with ctx.agent("boss") as b:
             ctx.clock.sleep(1.0)
-            b.send("worker", "late 1")  # worker never runs again: neither message is delivered
+            b.send("worker", "late 1")
             b.send("worker", "late 2")
         return "out"
     res = evaluate(FunctionSwarm(run), Benchmark("b", [Task(task_id="t", input="q")]), trials=1,
@@ -236,13 +233,13 @@ def test_open_span_tooltip_matches_drawn_bar():
                    clock_factory=SimClock, coordination=False)
     traj = res.runs.trajectories[0]
     span = next(s for s in traj.spans.values() if s.agent_id == "crashed")
-    span.end = None  # e.g. the process died before the span closed; the bar runs to the end of the run
+    span.end = None
     doc = render_html(res)
     assert re.search(r"<title>crashed span 3\.00s \(no end\)", doc), re.findall(r"<title>crashed span[^<]*", doc)
 
 
 def test_failed_coordination_is_reported_not_called_skipped(monkeypatch):
-    ev = sys.modules["swarmeval.evaluate"]   # the package attribute is the evaluate() function
+    ev = sys.modules["swarmeval.evaluate"]
     real, calls = ev.compute_coordination, []
 
     def flaky(traj, **kw):
@@ -257,8 +254,6 @@ def test_failed_coordination_is_reported_not_called_skipped(monkeypatch):
     doc = render_html(res)
     assert "coordination analysis failed on 1/2 runs: KeyError: " in visible_text(doc)
     assert "was skipped" not in doc and HOSTILE not in doc
-    # no summary but recorded errors (every run failing raises in analyze_runs; a
-    # result built by hand can still look like this): the note, not "skipped"
     res.coordination = None
     doc = render_html(res)
     assert "coordination analysis failed on 1/2 runs: KeyError: " in visible_text(doc)
@@ -278,6 +273,7 @@ def test_every_run_failing_coordination_raises(monkeypatch):
 
 def test_empty_runset_writes_a_summary_page(tmp_path):
     from argparse import Namespace
+
     from swarmeval.cli import _check_html_run
     from swarmeval.runner import RunSet
     _check_html_run(Namespace(html="r.html", run=None), 0)

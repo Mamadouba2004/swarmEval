@@ -27,21 +27,29 @@ too large.
 message graph once replies are set aside -- a request answered by a result is
 a round trip, never a cycle.  ``isolated_agents`` exchanged nothing with any
 other agent (no message, artifact or invocation edge either way).
+
+Classes:
+- CriticalPath: The heaviest DAG path. ``node_ids`` in path order; ``per_agent_s`` is each agent's working time on
+  it and ``wait_s`` the duration of waits that lie on it (they weigh 0 in the length).
+- DependencyMetrics: Dependency structure of one run (see the module docstring). Ratios are ``None`` when undefined
+  (no wall clock, empty critical path).
+- DependencySummary: Dependency metrics over runs; ratio summaries cover the runs where the ratio is defined
+  (``n``).
 """
 from __future__ import annotations
 
 import heapq
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 from ..graph.builder import EPS, ExecutionGraph, build_graph
 from ..schema import MessageKind, Trajectory
-from ..stats import Summary, summarize
+from ..stats import Summary, known_summary, summarize
 from .efficiency import EfficiencyMetrics, union_length
 
 _CALL_KINDS = ("llm", "tool")
-# Kinds that ask for something; a result/feedback going back the other way answers them.
 REQUEST_KINDS = frozenset({MessageKind.TASK_ASSIGNMENT.value, MessageKind.REQUEST.value,
                            MessageKind.COORDINATION.value})
 ANSWER_KINDS = frozenset({MessageKind.RESULT.value, MessageKind.FEEDBACK.value})
@@ -49,58 +57,51 @@ ANSWER_KINDS = frozenset({MessageKind.RESULT.value, MessageKind.FEEDBACK.value})
 
 @dataclass
 class CriticalPath:
-    """The heaviest DAG path.  ``node_ids`` in path order; ``per_agent_s``
-    is each agent's working time on it and ``wait_s`` the duration of waits
-    that lie on it (they weigh 0 in the length)."""
     length_s: float = 0.0
-    node_ids: List[str] = field(default_factory=list)
-    per_agent_s: Dict[str, float] = field(default_factory=dict)
-    wait_s: Dict[str, float] = field(default_factory=dict)
+    node_ids: list[str] = field(default_factory=list)
+    per_agent_s: dict[str, float] = field(default_factory=dict)
+    wait_s: dict[str, float] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """The path as a JSON-ready dict."""
         return asdict(self)
 
 
 @dataclass
 class DependencyMetrics:
-    """Dependency structure of one run (see the module docstring).  Ratios
-    are ``None`` when undefined (no wall clock, empty critical path)."""
     critical_path: CriticalPath = field(default_factory=CriticalPath)
     work_s: float = 0.0
     wall_s: float = 0.0
-    actual_parallelism: Optional[float] = None
-    potential_parallelism: Optional[float] = None
-    headroom_s: Optional[float] = None
-    headroom_ratio: Optional[float] = None
-    unrecorded_s: Optional[float] = None
+    actual_parallelism: float | None = None
+    potential_parallelism: float | None = None
+    headroom_s: float | None = None
+    headroom_ratio: float | None = None
+    unrecorded_s: float | None = None
     depth: int = 0
     inferred_edges_on_path: int = 0
-    cycles: List[List[str]] = field(default_factory=list)
-    isolated_agents: List[str] = field(default_factory=list)
+    cycles: list[list[str]] = field(default_factory=list)
+    isolated_agents: list[str] = field(default_factory=list)
 
     @property
     def critical_path_s(self) -> float:
+        """Length of the critical path in seconds."""
         return self.critical_path.length_s
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """The metrics as a JSON-ready dict."""
         d = asdict(self)
         d["critical_path_s"] = self.critical_path_s
         return d
 
 
-# --------------------------------------------------------------------------- #
-# Critical path
-# --------------------------------------------------------------------------- #
-def critical_path(graph: ExecutionGraph) -> Tuple[CriticalPath, int]:
-    """Heaviest path by topological DP (Kahn's algorithm, ready nodes taken
-    in start order so ties resolve the same way every time: the earliest
-    predecessor wins, and the earliest-finishing end node).  Returns the path
-    and the number of inferred edges on it."""
+def critical_path(graph: ExecutionGraph) -> tuple[CriticalPath, int]:
+    """Heaviest DAG path by Kahn-order DP, ties going to the earliest node so results are deterministic.
+    Returns the path and the number of inferred edges on it."""
     units = graph.dag_units
     order = {u.node_id: i for i, u in enumerate(units)}
-    indeg: Dict[str, int] = {u.node_id: 0 for u in units}
-    preds: Dict[str, List[Tuple[str, bool]]] = defaultdict(list)
-    succs: Dict[str, List[str]] = defaultdict(list)
+    indeg: dict[str, int] = {u.node_id: 0 for u in units}
+    preds: dict[str, list[tuple[str, bool]]] = defaultdict(list)
+    succs: dict[str, list[str]] = defaultdict(list)
     for e in graph.edges:
         if e.src in indeg and e.dst in indeg:
             indeg[e.dst] += 1
@@ -108,12 +109,12 @@ def critical_path(graph: ExecutionGraph) -> Tuple[CriticalPath, int]:
             succs[e.src].append(e.dst)
     ready = [order[n] for n, d in indeg.items() if d == 0]
     heapq.heapify(ready)
-    dist: Dict[str, float] = {}
-    best: Dict[str, Optional[Tuple[str, bool]]] = {}
+    dist: dict[str, float] = {}
+    best: dict[str, tuple[str, bool] | None] = {}
     while ready:
         n = units[heapq.heappop(ready)].node_id
         cand = sorted(preds.get(n, []), key=lambda p: order[p[0]])
-        top: Optional[Tuple[str, bool]] = None
+        top: tuple[str, bool] | None = None
         for p in cand:
             if p[0] in dist and (top is None or dist[p[0]] > dist[top[0]] + EPS):
                 top = p
@@ -126,12 +127,12 @@ def critical_path(graph: ExecutionGraph) -> Tuple[CriticalPath, int]:
     if not dist:
         return CriticalPath(), 0
     end = None
-    for u in units:   # start order; strict > keeps the earliest on ties
+    for u in units:
         if u.node_id in dist and (end is None or dist[u.node_id] > dist[end] + EPS):
             end = u.node_id
-    path: List[str] = []
+    path: list[str] = []
     inferred = 0
-    cur: Optional[str] = end
+    cur: str | None = end
     while cur is not None:
         path.append(cur)
         step = best.get(cur)
@@ -139,10 +140,8 @@ def critical_path(graph: ExecutionGraph) -> Tuple[CriticalPath, int]:
             inferred += 1
         cur = step[0] if step else None
     path.reverse()
-    # zero-weight nodes (sends, receives, waits) stay on the path: they cost
-    # nothing but show how the work is chained across agents
-    per_agent: Dict[str, float] = defaultdict(float)
-    waits: Dict[str, float] = defaultdict(float)
+    per_agent: dict[str, float] = defaultdict(float)
+    waits: dict[str, float] = defaultdict(float)
     for n in path:
         u = graph.unit(n)
         key = u.agent_id or "-"
@@ -153,16 +152,12 @@ def critical_path(graph: ExecutionGraph) -> Tuple[CriticalPath, int]:
     return CriticalPath(dist[end], path, dict(per_agent), dict(waits)), inferred
 
 
-# --------------------------------------------------------------------------- #
-# Agent-level structure
-# --------------------------------------------------------------------------- #
-def reply_flags(traj: Trajectory) -> List[Tuple[Any, bool]]:
-    """Messages in start order, each with whether it is a reply: it names
-    the message it answers (``reply_to``), or it is a result/feedback to an
-    agent that earlier sent its sender a request or task assignment."""
+def reply_flags(traj: Trajectory) -> list[tuple[Any, bool]]:
+    """Messages in start order, each flagged as a reply when it names ``reply_to`` or is a result/feedback
+    to an agent that earlier sent its sender a request or task assignment."""
     msgs = sorted(traj.messages(), key=lambda e: e.timestamp)
-    asked: Set[Tuple[str, str]] = set()      # (asker, asked)
-    out: List[Tuple[Any, bool]] = []
+    asked: set[tuple[str, str]] = set()
+    out: list[tuple[Any, bool]] = []
     for ev in msgs:
         is_reply = bool(ev.reply_to) or (ev.kind in ANSWER_KINDS and (ev.receiver, ev.sender) in asked)
         if ev.kind in REQUEST_KINDS and ev.sender and ev.receiver:
@@ -171,19 +166,19 @@ def reply_flags(traj: Trajectory) -> List[Tuple[Any, bool]]:
     return out
 
 
-def tarjan_scc(nodes: Sequence[str], adj: Dict[str, List[str]]) -> List[List[str]]:
+def tarjan_scc(nodes: Sequence[str], adj: dict[str, list[str]]) -> list[list[str]]:
     """Strongly connected components (iterative Tarjan), each in ``nodes`` order."""
-    index: Dict[str, int] = {}
-    low: Dict[str, int] = {}
-    on: Set[str] = set()
-    stack: List[str] = []
-    out: List[List[str]] = []
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    on: set[str] = set()
+    stack: list[str] = []
+    out: list[list[str]] = []
     counter = 0
     rank = {n: i for i, n in enumerate(nodes)}
     for root in nodes:
         if root in index:
             continue
-        work: List[Tuple[str, int]] = [(root, 0)]
+        work: list[tuple[str, int]] = [(root, 0)]
         while work:
             v, i = work.pop()
             if i == 0:
@@ -215,8 +210,9 @@ def tarjan_scc(nodes: Sequence[str], adj: Dict[str, List[str]]) -> List[List[str
     return out
 
 
-def message_cycles(traj: Trajectory, agents: Sequence[str]) -> List[List[str]]:
-    adj: Dict[str, List[str]] = defaultdict(list)
+def message_cycles(traj: Trajectory, agents: Sequence[str]) -> list[list[str]]:
+    """Cycles in the agent graph of non-reply messages."""
+    adj: dict[str, list[str]] = defaultdict(list)
     for ev, is_reply in reply_flags(traj):
         if is_reply or not ev.sender or not ev.receiver or ev.sender == ev.receiver:
             continue
@@ -226,20 +222,19 @@ def message_cycles(traj: Trajectory, agents: Sequence[str]) -> List[List[str]]:
     return [c for c in tarjan_scc(nodes, adj) if len(c) >= 3]
 
 
-def _inside_calls(traj: Trajectory, graph: ExecutionGraph) -> Set[str]:
-    """Spans run inside another span's LLM/tool call, directly or through an
-    ancestor: recorded since schema v2; on Phase 1 data, a span lying inside a
-    call of one of its ancestor spans."""
+def _inside_calls(traj: Trajectory, graph: ExecutionGraph) -> set[str]:
+    """Spans run inside another span's LLM/tool call, directly or via an ancestor: recorded since schema v2,
+    inferred on Phase 1 data from a span lying inside a call of one of its ancestors."""
     spans = traj.spans
-    calls: Dict[str, List[Any]] = defaultdict(list)
+    calls: dict[str, list[Any]] = defaultdict(list)
     for u in graph.units:
         if u.kind in _CALL_KINDS:
             calls[u.span_id].append(u)
-    out: Set[str] = set()
+    out: set[str] = set()
     for sid, s in spans.items():
         end = s.end if s.end is not None else s.start
-        cur: Optional[str] = sid
-        seen: Set[str] = set()
+        cur: str | None = sid
+        seen: set[str] = set()
         while cur in spans and cur not in seen:
             seen.add(cur)
             if graph.schema_version is not None:
@@ -253,11 +248,9 @@ def _inside_calls(traj: Trajectory, graph: ExecutionGraph) -> Set[str]:
     return out
 
 
-# --------------------------------------------------------------------------- #
-# Entry point
-# --------------------------------------------------------------------------- #
-def compute_dependency(traj: Trajectory, graph: Optional[ExecutionGraph] = None,
-                       efficiency: Optional[EfficiencyMetrics] = None) -> DependencyMetrics:
+def compute_dependency(traj: Trajectory, graph: ExecutionGraph | None = None,
+                       efficiency: EfficiencyMetrics | None = None) -> DependencyMetrics:
+    """Critical path, parallelism and agent-level dependency structure of one run."""
     graph = graph or build_graph(traj)
     cp, inferred = critical_path(graph)
     out = DependencyMetrics(critical_path=cp, inferred_edges_on_path=inferred)
@@ -282,35 +275,30 @@ def compute_dependency(traj: Trajectory, graph: Optional[ExecutionGraph] = None,
 
 @dataclass
 class DependencySummary:
-    """Dependency metrics over runs; ratio summaries cover the runs where
-    the ratio is defined (``n``)."""
     n_runs: int
     critical_path_s: Summary
     work_s: Summary
-    actual_parallelism: Optional[Summary]
-    potential_parallelism: Optional[Summary]
-    headroom_s: Optional[Summary]
-    headroom_ratio: Optional[Summary]
-    unrecorded_s: Optional[Summary]
+    actual_parallelism: Summary | None
+    potential_parallelism: Summary | None
+    headroom_s: Summary | None
+    headroom_ratio: Summary | None
+    unrecorded_s: Summary | None
     depth: Summary
     runs_with_cycles: int = 0
-    isolated_agents: Dict[str, int] = field(default_factory=dict)
-    critical_path_share: Dict[str, float] = field(default_factory=dict)
+    isolated_agents: dict[str, int] = field(default_factory=dict)
+    critical_path_share: dict[str, float] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """The summary as a JSON-ready dict."""
         return {k: (v.to_dict() if isinstance(v, Summary) else v) for k, v in self.__dict__.items()}
 
-
-def _known(values: Sequence[Optional[float]]) -> Optional[Summary]:
-    known = [v for v in values if v is not None]
-    return summarize(known) if known else None
 
 
 def summarize_dependency(per_run: Sequence[DependencyMetrics]) -> DependencySummary:
     """``critical_path_share[a]`` = mean over runs of agent ``a``'s working
     time on the critical path ÷ its length (runs with an empty path skipped)."""
-    iso: Dict[str, int] = defaultdict(int)
-    share: Dict[str, List[float]] = defaultdict(list)
+    iso: dict[str, int] = defaultdict(int)
+    share: dict[str, list[float]] = defaultdict(list)
     for r in per_run:
         for a in r.isolated_agents:
             iso[a] += 1
@@ -321,11 +309,11 @@ def summarize_dependency(per_run: Sequence[DependencyMetrics]) -> DependencySumm
     return DependencySummary(
         n_runs=len(per_run), critical_path_s=summarize([r.critical_path_s for r in per_run]),
         work_s=summarize([r.work_s for r in per_run]),
-        actual_parallelism=_known([r.actual_parallelism for r in per_run]),
-        potential_parallelism=_known([r.potential_parallelism for r in per_run]),
-        headroom_s=_known([r.headroom_s for r in per_run]),
-        headroom_ratio=_known([r.headroom_ratio for r in per_run]),
-        unrecorded_s=_known([r.unrecorded_s for r in per_run]),
+        actual_parallelism=known_summary([r.actual_parallelism for r in per_run]),
+        potential_parallelism=known_summary([r.potential_parallelism for r in per_run]),
+        headroom_s=known_summary([r.headroom_s for r in per_run]),
+        headroom_ratio=known_summary([r.headroom_ratio for r in per_run]),
+        unrecorded_s=known_summary([r.unrecorded_s for r in per_run]),
         depth=summarize([r.depth for r in per_run]),
         runs_with_cycles=sum(1 for r in per_run if r.cycles), isolated_agents=dict(iso),
         critical_path_share={a: sum(v) / n_cp for a, v in share.items()} if n_cp else {})

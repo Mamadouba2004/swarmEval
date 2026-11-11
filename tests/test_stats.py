@@ -1,3 +1,4 @@
+"""Tests for the descriptive statistics helpers."""
 import pytest
 
 from swarmeval import stats

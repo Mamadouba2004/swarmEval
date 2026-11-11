@@ -5,59 +5,75 @@ graph once and hands it to each analysis -- provenance coverage, utilization,
 observed contribution, communication overhead, redundancy, dependencies
 (critical path, parallelism) and context bloat -- and finally runs the smell
 detectors (``diagnostics``) over the result.
+
+Classes:
+- CoordinationMetrics: Coordination analysis of one run. ``graph`` is kept for later analyses and exports but left
+  out of ``to_dict`` (export it separately).
+- CoordinationSummary: Coordination metrics over a set of runs. Coverage summaries are over the runs where the ratio
+  is defined (``n`` says how many); ``None`` when no run had anything to measure.
 """
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any
 
 from ..graph.builder import Coverage, ExecutionGraph, build_graph
 from ..schema import Trajectory
-from ..stats import Summary, mean, summarize
-from .contribution import (AgentUtilization, Lineage, ObservedContribution, compute_contribution,
-                           compute_utilization, final_lineage, summarize_contribution)
-from .communication import (CommunicationMetrics, CommunicationSummary, compute_communication,
-                            summarize_communication)
-from .efficiency import EfficiencyMetrics
-from .context import ContextMetrics, ContextSummary, compute_context, summarize_context
-from .dependency import DependencyMetrics, DependencySummary, compute_dependency, summarize_dependency
-from .redundancy import RedundancyMetrics, RedundancySummary, compute_redundancy, summarize_redundancy
-from ..diagnostics.engine import DiagnosticsReport, summarize_diagnostics
-from ..diagnostics.smells import Diagnostic, detect_smells, resolve_smell_config
 from ..similarity import resolve_similarity
+from ..stats import Summary, known_summary, mean, summarize
+from .communication import CommunicationMetrics, CommunicationSummary, compute_communication, summarize_communication
+from .context import ContextMetrics, ContextSummary, compute_context, summarize_context
+from .contribution import (
+    AgentUtilization,
+    Lineage,
+    ObservedContribution,
+    compute_contribution,
+    compute_utilization,
+    final_lineage,
+    summarize_contribution,
+)
+from .dependency import DependencyMetrics, DependencySummary, compute_dependency, summarize_dependency
+from .efficiency import EfficiencyMetrics
+from .redundancy import RedundancyMetrics, RedundancySummary, compute_redundancy, summarize_redundancy
+
+if TYPE_CHECKING:
+    from ..diagnostics.engine import DiagnosticsReport
+    from ..diagnostics.smells import Diagnostic
 
 
 def _dict(x: Any) -> Any:
+    """``x.to_dict()`` when available, else ``x``."""
     return x.to_dict() if hasattr(x, "to_dict") else x
 
 
 @dataclass
 class CoordinationMetrics:
-    """Coordination analysis of one run.  ``graph`` is kept for later
-    analyses and exports but left out of ``to_dict`` (export it separately)."""
     run_id: str
     coverage: Coverage
-    utilization: Dict[str, AgentUtilization]
-    contribution: Dict[str, ObservedContribution]
+    utilization: dict[str, AgentUtilization]
+    contribution: dict[str, ObservedContribution]
     lineage: Lineage = field(default_factory=Lineage)
-    communication: Optional[CommunicationMetrics] = None
-    redundancy: Optional[RedundancyMetrics] = None
-    dependency: Optional[DependencyMetrics] = None
-    context: Optional[ContextMetrics] = None
-    diagnostics: List[Diagnostic] = field(default_factory=list)
-    graph: Optional[ExecutionGraph] = field(default=None, repr=False, compare=False)
+    communication: CommunicationMetrics | None = None
+    redundancy: RedundancyMetrics | None = None
+    dependency: DependencyMetrics | None = None
+    context: ContextMetrics | None = None
+    diagnostics: list[Diagnostic] = field(default_factory=list)
+    graph: ExecutionGraph | None = field(default=None, repr=False, compare=False)
 
     @property
-    def dead_agents(self) -> List[str]:
+    def dead_agents(self) -> list[str]:
         """Agents whose ``dead`` is True (complete provenance, nothing used)."""
         return [a for a, c in self.contribution.items() if c.dead is True]
 
     @property
-    def lineage_agents(self) -> List[str]:
+    def lineage_agents(self) -> list[str]:
+        """Agents with an artifact in the final output's lineage."""
         return [a for a, c in self.contribution.items() if c.in_final_lineage]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """The metrics as a JSON-ready dict, without the graph."""
         return {
             "run_id": self.run_id, "coverage": self.coverage.to_dict(),
             "utilization": {k: v.to_dict() for k, v in self.utilization.items()},
@@ -70,15 +86,12 @@ class CoordinationMetrics:
         }
 
 
-def compute_coordination(traj: Trajectory, graph: Optional[ExecutionGraph] = None, similarity: Any = None,
+def compute_coordination(traj: Trajectory, graph: ExecutionGraph | None = None, similarity: Any = None,
                          smell_config: Any = None,
-                         efficiency: Optional[EfficiencyMetrics] = None) -> CoordinationMetrics:
-    """Coordination metrics of one run.  ``similarity`` is the artifact
-    redundancy backend (anything ``resolve_similarity`` accepts; resolve it
-    once and pass the instance when analysing many runs); ``smell_config``
-    sets the smell thresholds (a ``SmellConfig``, a dict of overrides or a
-    JSON path; default ``SmellConfig()``); ``efficiency`` avoids recomputing
-    the run's efficiency metrics."""
+                         efficiency: EfficiencyMetrics | None = None) -> CoordinationMetrics:
+    """Coordination metrics of one run; ``similarity`` and ``smell_config`` accept what their resolvers do.
+    Pass a resolved ``similarity`` and the run's ``efficiency`` to avoid recomputing them over many runs."""
+    from ..diagnostics.smells import detect_smells, resolve_smell_config
     graph = graph or build_graph(traj)
     lineage = final_lineage(traj)
     cm = CoordinationMetrics(
@@ -94,23 +107,21 @@ def compute_coordination(traj: Trajectory, graph: Optional[ExecutionGraph] = Non
 
 @dataclass
 class CoordinationSummary:
-    """Coordination metrics over a set of runs.  Coverage summaries are over
-    the runs where the ratio is defined (``n`` says how many); ``None`` when
-    no run had anything to measure."""
     n_runs: int
-    message_receive_coverage: Optional[Summary]
-    derivation_coverage: Optional[Summary]
+    message_receive_coverage: Summary | None
+    derivation_coverage: Summary | None
     dead_agents_per_run: Summary
-    utilization: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    contribution: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    communication: Optional[CommunicationSummary] = None
-    redundancy: Optional[RedundancySummary] = None
-    dependency: Optional[DependencySummary] = None
-    context: Optional[ContextSummary] = None
-    diagnostics: Optional[DiagnosticsReport] = None
-    smells_per_run: Optional[Summary] = None
+    utilization: dict[str, dict[str, Any]] = field(default_factory=dict)
+    contribution: dict[str, dict[str, Any]] = field(default_factory=dict)
+    communication: CommunicationSummary | None = None
+    redundancy: RedundancySummary | None = None
+    dependency: DependencySummary | None = None
+    context: ContextSummary | None = None
+    diagnostics: DiagnosticsReport | None = None
+    smells_per_run: Summary | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """The summary as a JSON-ready dict."""
         return {
             "n_runs": self.n_runs,
             "message_receive_coverage": _dict(self.message_receive_coverage),
@@ -123,13 +134,11 @@ class CoordinationSummary:
         }
 
 
-def _known(values: Sequence[Optional[float]]) -> Optional[Summary]:
-    known = [v for v in values if v is not None]
-    return summarize(known) if known else None
-
 
 def summarize_coordination(per_run: Sequence[CoordinationMetrics]) -> CoordinationSummary:
-    util: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
+    """Coordination metrics over runs, summarizing each analysis the runs have."""
+    from ..diagnostics.engine import summarize_diagnostics
+    util: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for cm in per_run:
         for aid, u in cm.utilization.items():
             for k in ("token_share", "llm_call_share", "tool_call_share", "busy_share"):
@@ -145,16 +154,14 @@ def summarize_coordination(per_run: Sequence[CoordinationMetrics]) -> Coordinati
     ctx = [cm.context for cm in per_run if cm.context is not None]
     return CoordinationSummary(
         n_runs=len(per_run),
-        message_receive_coverage=_known([cm.coverage.message_receive_coverage for cm in per_run]),
-        derivation_coverage=_known([cm.coverage.derivation_coverage for cm in per_run]),
+        message_receive_coverage=known_summary([cm.coverage.message_receive_coverage for cm in per_run]),
+        derivation_coverage=known_summary([cm.coverage.derivation_coverage for cm in per_run]),
         dead_agents_per_run=summarize([len(cm.dead_agents) for cm in per_run]),
         utilization=utilization,
         contribution=summarize_contribution([cm.contribution for cm in per_run]),
-        # runs computed elsewhere may lack an analysis: summarise the ones that have it
         communication=summarize_communication(comm) if comm else None,
         redundancy=summarize_redundancy(red) if red else None,
         dependency=summarize_dependency(dep) if dep else None,
         context=summarize_context(ctx) if ctx else None,
         diagnostics=summarize_diagnostics([list(cm.diagnostics or []) for cm in per_run]),
-        # distinct smells per run: a smell seen twice in one run counts once, as in the prevalence table
         smells_per_run=summarize([len({d.smell for d in cm.diagnostics}) for cm in per_run]))

@@ -34,8 +34,7 @@ def test_golden_demo_contribution(demo):
         assert c["researcher_c"].dead is True
         assert c["researcher_c"].status == "delivered_only" and c["researcher_c"].provenance_coverage == 1.0
         assert set(cm.lineage_agents) == {"researcher_a", "researcher_b", "critic", "synthesizer"}
-        assert cm.lineage.inferred == []                 # all recorded via derived_from
-        # the coordinator relays: no artifacts of its own, but its messages are used
+        assert cm.lineage.inferred == []
         assert c["coordinator"].status == "delivered_only" and c["coordinator"].dead is False
         assert c["coordinator"].messages_used > 0
         assert c["synthesizer"].status == "in_final_lineage" and c["synthesizer"].dead is False
@@ -58,15 +57,13 @@ def test_utilization_shares(demo):
     assert sum(u.busy_share for u in util.values()) == pytest.approx(1.0)
     assert util["synthesizer"].tool_call_share == 0.0
     assert sum(u.tool_call_share for u in util.values()) == pytest.approx(1.0)
-    # notes_a is used by coordinator, critic and synthesizer
     assert util["researcher_a"].downstream_refs == 3 and util["researcher_c"].downstream_refs == 0
     assert util["coordinator"].messages_sent == 5 and util["coordinator"].artifacts_produced == 0
 
 
 def _handoff(receiver_records_use):
-    """a produces notes and sends them to b, which never uses them.  When
-    instrumented, b reads them and then records a call on other inputs;
-    otherwise all of b's (unrecorded) work happens before it reads them."""
+    """a sends b notes that b never uses: when instrumented, b reads them and then records a call on other
+    inputs; otherwise all of b's unrecorded work happens before it reads them."""
     ctx = make_ctx()
     clock = ctx.clock
     with ctx.agent("a") as a:
@@ -93,7 +90,7 @@ def test_partial_instrumentation_never_says_dead():
     assert cm.coverage.consumers_instrumented == {"a": False, "b": False}
     assert a.status == "delivered_only" and a.provenance_coverage == 0.0
     assert a.dead is None
-    assert cm.contribution["b"].dead is False                       # produced the final output
+    assert cm.contribution["b"].dead is False
 
 
 def test_complete_instrumentation_and_no_use_is_dead():
@@ -123,9 +120,8 @@ def test_message_to_self_does_not_make_provenance_complete():
 
 
 def test_empty_derived_from_does_not_make_an_agent_instrumented():
-    """b reads a's message in an LLM call that lists no inputs; its only
-    provenance record is an artifact made "from nothing".  That says nothing
-    about what b's calls used, so a cannot be judged dead."""
+    """An artifact made "from nothing" says nothing about what b's calls used, so a (whose message b read
+    in a call listing no inputs) cannot be judged dead."""
     ctx = make_ctx()
     clock = ctx.clock
     with ctx.agent("a") as a:
@@ -142,9 +138,8 @@ def test_empty_derived_from_does_not_make_an_agent_instrumented():
 
 
 def test_reading_an_artifact_message_in_a_call_without_recorded_inputs_counts_as_use():
-    """b records inputs on one call, then reads a's message in a call that
-    lists none: the content may have been used, so a is not dead.  A later
-    call that lists *other* inputs is recorded non-use (see _handoff)."""
+    """Reading a's message in a call that lists no inputs may be use, so a is not dead; a call listing
+    *other* inputs is recorded non-use (see _handoff)."""
     ctx = make_ctx()
     clock = ctx.clock
     with ctx.agent("a") as a:
@@ -154,7 +149,7 @@ def test_reading_an_artifact_message_in_a_call_without_recorded_inputs_counts_as
         own = b.produce("own", "b's own work", derived_from=[])
         llm(b, clock, 1.0, input_artifacts=[own])
         b.receive()
-        llm(b, clock, 1.0)                              # reads the notes' text, lists no artifact
+        llm(b, clock, 1.0)
         final = b.produce("final", "answer")
     ctx.set_output("answer", artifacts=[final])
     cm = compute_coordination(ctx.finish())
@@ -171,7 +166,7 @@ def test_consumption_and_lineage_fallback_without_derived_from():
         notes = a.produce("notes", "facts")
     with ctx.agent("b") as b:
         b.consume(notes)
-        draft = b.produce("draft", "d")                 # derived_from not recorded
+        draft = b.produce("draft", "d")
     with ctx.agent("c") as c:
         llm(c, clock, 1.0, input_artifacts=[draft])
         final = c.produce("final", "f", derived_from=[draft])
@@ -179,7 +174,7 @@ def test_consumption_and_lineage_fallback_without_derived_from():
     traj = ctx.finish()
     lin = final_lineage(traj)
     assert set(lin.artifacts) == {final.artifact_id, draft.artifact_id, notes.artifact_id}
-    assert lin.inferred == [notes.artifact_id]          # reached only through b's span consumption
+    assert lin.inferred == [notes.artifact_id]
     contrib = compute_contribution(traj)
     assert contrib["a"].in_final_lineage and contrib["a"].lineage_inferred
     assert contrib["b"].in_final_lineage and not contrib["b"].lineage_inferred
@@ -208,7 +203,6 @@ def test_summary_dead_rate_ignores_unknown_runs():
 def test_contribution_is_never_reported_as_a_percentage(demo):
     text = json.dumps(demo.coordination.to_dict()) + json.dumps(demo.per_run_coordination[0].to_dict())
     assert "contributed" not in text
-    # diagnostics quote measured shares ("68% similar"); contribution itself is never a percentage
     cm, cs = demo.per_run_coordination[0], demo.coordination
     contrib = json.dumps([{k: v.to_dict() for k, v in cm.contribution.items()}, cm.lineage.to_dict(),
                           cs.contribution])

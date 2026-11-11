@@ -6,8 +6,21 @@ import sys
 
 import pytest
 
-from swarmeval import (EvaluationResult, LexicalSimilarity, RunContext, SimClock, Task, cli, compare,
-                       compute_coordination, evaluate, export_graph, to_dot, to_json, to_mermaid)
+from swarmeval import (
+    EvaluationResult,
+    LexicalSimilarity,
+    RunContext,
+    SimClock,
+    Task,
+    cli,
+    compare,
+    compute_coordination,
+    evaluate,
+    export_graph,
+    to_dot,
+    to_json,
+    to_mermaid,
+)
 from swarmeval.cli import main
 from swarmeval.compare import METRICS
 from swarmeval.evaluate import analyze_runs, load_runset
@@ -25,15 +38,13 @@ def demo():
 def test_mermaid_agents_view(demo):
     cm = demo.per_run_coordination[0]
     text = to_mermaid(cm.graph, coordination=cm)
-    assert text == to_mermaid(cm.graph, coordination=cm)              # deterministic
+    assert text == to_mermaid(cm.graph, coordination=cm)
     lines = text.splitlines()
     assert lines[0] == "flowchart LR"
     assert '    a3["researcher_c<br/>3% tokens"]:::dead' in lines
     assert any(ln.startswith("    classDef dead") and "stroke-dasharray" in ln for ln in lines)
-    # receives were recorded, so no edge is dashed even though use of task assignments is judged by timing
     assert "-.->" not in text
     assert '    a0 -->|"message ×1 · 186 tok"| a4' in lines
-    # researcher_a's notes went to the coordinator, the critic and the synthesizer
     assert sum(1 for ln in lines if ln.startswith("    a1 -->|\"artifact ×1 · ")) == 3
 
 
@@ -124,7 +135,7 @@ def test_cli_coordination_flags(tmp_path, demo, capsys):
     with pytest.raises(SystemExit, match="typo"):
         main(["report", str(saved), "--smells-config", str(cfg)])
     assert main(["compare", str(saved), str(saved), "--no-coordination"]) == 0
-    assert "Critical Path" in capsys.readouterr().out    # row present, value unknown
+    assert "Critical Path" in capsys.readouterr().out
 
 
 def test_compare_shows_coordination_metrics_with_neutral_direction(demo):
@@ -136,7 +147,7 @@ def test_compare_shows_coordination_metrics_with_neutral_direction(demo):
     comm = cmp.metric("comm_work_ratio")
     assert comm.verdict == "changed" and comm.higher_is_better is None
     assert "comm_work_ratio" not in cmp.improved + cmp.regressed
-    assert cmp.metric("smells_per_run").verdict == "regressed"           # ping-pong added
+    assert cmp.metric("smells_per_run").verdict == "regressed"
     assert cmp.metric("critical_path_s").verdict == "regressed"
     text = cmp.report()
     assert "Communication / Work" in text and "changed (no better direction): " in text
@@ -156,7 +167,6 @@ def test_result_to_dict_is_json_serializable(demo, tmp_path):
     assert back.coordination.diagnostics.names == demo.coordination.diagnostics.names
 
 
-# -- `swarmeval graph` honours the same analysis options as `report` ------------ #
 @pytest.fixture
 def saved_demo(tmp_path):
     path = str(tmp_path / "r.json")
@@ -192,7 +202,7 @@ def test_graph_no_coordination_skips_the_analysis(saved_demo, coordination_calls
 
 def test_graph_out_file_is_utf8_under_an_ascii_locale(saved_demo, tmp_path):
     out = tmp_path / "f.mmd"
-    env = dict(os.environ, PYTHONUTF8="0", LC_ALL="C", LANG="C")   # LC_ALL also stops C-locale coercion
+    env = dict(os.environ, PYTHONUTF8="0", LC_ALL="C", LANG="C")
     proc = subprocess.run([sys.executable, "-m", "swarmeval.cli", "graph", saved_demo, "--out", str(out)],
                           env=env, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr

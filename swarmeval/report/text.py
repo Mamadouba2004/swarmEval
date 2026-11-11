@@ -2,19 +2,22 @@
 from __future__ import annotations
 
 import textwrap
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from ..schema import EventType, Trajectory, preview
 from ..stats import Summary
 
 
 def bar(frac: float, width: int = 16) -> str:
+    """A text bar of ``width`` cells filled to ``frac``."""
     frac = max(0.0, min(1.0, frac))
     n = int(round(frac * width))
     return "█" * n + "░" * (width - n)
 
 
-def _money(x: Optional[float], complete: bool = True) -> str:
+def _money(x: float | None, complete: bool = True) -> str:
+    """A cost in dollars, 'unknown' for None, with '*' when incomplete."""
     if x is None:
         return "unknown"
     s = f"${x:.2f}" if x >= 0.1 else f"${x:.4f}"
@@ -22,14 +25,17 @@ def _money(x: Optional[float], complete: bool = True) -> str:
 
 
 def _pct(x: float) -> str:
+    """A fraction as a percentage with one decimal."""
     return f"{x*100:.1f}%"
 
 
 def _spread(s: Summary, unit: str = "", digits: int = 1) -> str:
+    """A summary as its mean with spread."""
     return s.fmt(unit=unit, digits=digits)
 
 
 def box(title: str, rows: Sequence[Any], width: int = 58) -> str:
+    """Rows framed in a box that widens to fit them; tuples are (label, value[, flag])."""
     longest = max([len(r) + 3 for r in rows if isinstance(r, str)]
                   + [max(28, len(r[0])) + len(r[1]) + len(r[2] if len(r) > 2 else "") + 6
                      for r in rows if isinstance(r, tuple)] + [width])
@@ -61,16 +67,18 @@ def _run_shape(result: Any) -> str:
 
 
 def _per_trial(perf: Any) -> str:
+    """Per-trial success rates, noting when an incomplete trial was left out."""
     return (", ".join(_pct(x) for x in perf.per_trial)
             + ("  (incomplete trial excluded)" if len(perf.per_trial) < perf.trials else ""))
 
 
 def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
                 show_coordination: bool = True) -> str:
+    """The evaluation as a text report."""
     perf, eff = result.performance, result.efficiency
     n_runs = len(result.runs)
     planned = result.runs.metadata.get("planned_runs", n_runs)
-    rows: List[Any] = [
+    rows: list[Any] = [
         f"{result.label}  ·  {result.benchmark}  ·  {_run_shape(result)}",
         None,
         ("Task Success", f"{perf.n_successes}/{n_runs}  ({_pct(perf.success_rate)})"),
@@ -89,7 +97,8 @@ def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
         ("Cost / Run", _money(result.cost["per_run"], eff.cost_complete)),
         ("Cost / Successful Task", _money(eff.cost_per_success, eff.cost_complete)),
         ("Total Cost", _money(eff.cost_total, eff.cost_complete)),
-        ("Tokens / Run", f"{eff.tokens.mean:,.0f}  (in {eff.input_tokens.mean:,.0f} / out {eff.output_tokens.mean:,.0f})"),
+        ("Tokens / Run", f"{eff.tokens.mean:,.0f}  "
+                         f"(in {eff.input_tokens.mean:,.0f} / out {eff.output_tokens.mean:,.0f})"),
         ("LLM Calls / Run", f"{eff.llm_calls.mean:.1f}"),
         ("Tool Calls / Run", f"{eff.tool_calls.mean:.1f}"),
         ("Messages / Run", f"{eff.messages.mean:.1f}"),
@@ -110,9 +119,11 @@ def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
     if show_agents and eff.per_agent:
         parts.append("")
         parts.append("AGENTS (per run, mean)")
-        parts.append(f"  {'agent':<16}{'role':<12}{'tokens':<24}{'llm':>5}{'tools':>6}{'msgs':>6}{'time':>8}{'cost':>10}")
+        parts.append(f"  {'agent':<16}{'role':<12}{'tokens':<24}{'llm':>5}{'tools':>6}{'msgs':>6}"
+                     f"{'time':>8}{'cost':>10}")
         for aid, u in sorted(eff.per_agent.items(), key=lambda kv: -kv[1]["token_share"]):
-            parts.append(f"  {aid:<16}{(u.get('role') or '-')[:11]:<12}{bar(u['token_share'])} {u['token_share']*100:>4.0f}%"
+            parts.append(f"  {aid:<16}{(u.get('role') or '-')[:11]:<12}{bar(u['token_share'])} "
+                         f"{u['token_share']*100:>4.0f}%"
                          f"{u['llm_calls']:>5.1f}{u['tool_calls']:>6.1f}{u['messages_sent']:>6.1f}"
                          f"{u['self_time_s']:>7.1f}s{_money(u['cost_usd'], u.get('cost_complete', True)):>10}")
 
@@ -133,19 +144,15 @@ def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
     return "\n".join(parts)
 
 
-# --------------------------------------------------------------------------- #
-# Coordination (Phase 2)
-# --------------------------------------------------------------------------- #
 _LABEL_W, _VALUE_W = 46, 30
 _SEV_MARK = {"high": "⚠ HIGH", "medium": "⚠ MED ", "low": "· LOW "}
-# Column definitions of the OBSERVED CONTRIBUTION table (text and HTML).
 CONTRIBUTION_NOTES = (
     "lineage = runs where its artifacts reached the final output; consumed = an artifact used by another agent;",
     "dead = nothing it sent was used (only over runs with complete provenance); coverage = provenance coverage",
 )
 
 
-def _ranged(s: Optional[Summary], fmt: Callable[[float], str]) -> str:
+def _ranged(s: Summary | None, fmt: Callable[[float], str]) -> str:
     """Mean over runs, with the range when runs differ; ``unknown`` when no
     run defined the value."""
     if s is None or s.n == 0:
@@ -157,22 +164,23 @@ def _ranged(s: Optional[Summary], fmt: Callable[[float], str]) -> str:
 
 
 def _row(label: str, value: str) -> str:
+    """One fixed-width label and value row."""
     return f"{label:<{_LABEL_W}}{value:>{_VALUE_W}}"
 
 
-def _wrap(prefix: str, text: str, indent: int, width: int = 104) -> List[str]:
+def _wrap(prefix: str, text: str, indent: int, width: int = 104) -> list[str]:
+    """Text wrapped after ``prefix`` with a hanging indent."""
     return textwrap.wrap(text, width=width, initial_indent=prefix, subsequent_indent=" " * indent) or [prefix]
 
 
-def coordination_rows(cs: Any) -> List[Optional[Tuple[str, str]]]:
-    """``(label, value)`` rows of the COORDINATION box, ``None`` between
-    groups.  Each label carries its definition in parentheses; the text and
-    HTML reports both render these rows, so the two never disagree."""
+def coordination_rows(cs: Any) -> list[tuple[str, str] | None]:
+    """``(label, value)`` rows of the COORDINATION box, ``None`` between groups, each label carrying its
+    definition; the text and HTML reports both render them."""
     dep, comm, red, ctx = cs.dependency, cs.communication, cs.redundancy, cs.context
     sec = lambda x: f"{x:.1f}s"         # noqa: E731
     times = lambda x: f"{x:.2f}×"       # noqa: E731
     pct = lambda x: f"{x * 100:.1f}%"  # noqa: E731
-    rows: List[Optional[Tuple[str, str]]] = []
+    rows: list[tuple[str, str] | None] = []
     if dep is not None:
         headroom = _ranged(dep.headroom_s, sec)
         if dep.headroom_ratio is not None:
@@ -209,7 +217,7 @@ def coordination_rows(cs: Any) -> List[Optional[Tuple[str, str]]]:
     return rows
 
 
-def cost_notes(eff: Any) -> List[str]:
+def cost_notes(eff: Any) -> list[str]:
     """Why the cost is incomplete, one note per cause (shared by the text and HTML reports)."""
     out = []
     if eff.cost_complete:
@@ -224,14 +232,15 @@ def cost_notes(eff: Any) -> List[str]:
 
 
 def durations_note(eff: Any) -> str:
+    """The note saying how many streamed calls have an unknown duration."""
     return (f"durations incomplete: {eff.unknown_duration_calls} streamed call(s) recorded with unknown duration "
             "(latency, work and critical path undercount)")
 
 
-def coordination_caveats(cs: Any, eff: Any = None) -> List[Tuple[bool, str]]:
+def coordination_caveats(cs: Any, eff: Any = None) -> list[tuple[bool, str]]:
     """``(is_warning, text)`` notes that qualify the COORDINATION numbers
     (shared by the text and HTML reports); ``eff`` is the efficiency summary."""
-    out: List[Tuple[bool, str]] = []
+    out: list[tuple[bool, str]] = []
     if eff is not None and not eff.duration_complete:
         out.append((True, durations_note(eff)))
     cov = cs.message_receive_coverage
@@ -245,21 +254,20 @@ def coordination_caveats(cs: Any, eff: Any = None) -> List[Tuple[bool, str]]:
 
 
 def _failed_row(result: Any) -> tuple:
+    """The COORDINATION box row naming how many runs' analysis failed and the first error."""
     errors = result.coordination_errors
     failed = f"{len(errors)}/{len(result.runs)} runs: {next(iter(errors.values()))}"
     return ("Analysis Failed", textwrap.shorten(failed, _LABEL_W + _VALUE_W - 30, placeholder="…"), "⚠")
 
 
 def render_coordination(result: Any) -> str:
-    """COORDINATION box, OBSERVED CONTRIBUTION table and DIAGNOSTICS list of
-    an ``EvaluationResult`` with coordination analysis.  Every ratio is named
-    with its definition; values are means over runs, with the range when the
-    runs differ."""
+    """COORDINATION box, OBSERVED CONTRIBUTION table and DIAGNOSTICS list of an EvaluationResult; values are
+    means over runs with the range when runs differ, and every ratio is named with its definition."""
     cs = result.coordination
     errors = result.coordination_errors
     if cs is None:
         return box("COORDINATION", [_failed_row(result)], width=_LABEL_W + _VALUE_W + 4) if errors else ""
-    rows: List[Any] = [f"{cs.n_runs} runs  ·  values are means over runs (range)", None]
+    rows: list[Any] = [f"{cs.n_runs} runs  ·  values are means over runs (range)", None]
     if errors:
         rows += [_failed_row(result), None]
     rows += [None if r is None else _row(*r) for r in coordination_rows(cs)]
@@ -303,7 +311,8 @@ def render_coordination(result: Any) -> str:
     return "\n".join(parts)
 
 
-def _fmt(x: Optional[float], unit: str) -> str:
+def _fmt(x: float | None, unit: str) -> str:
+    """A metric value formatted for its unit, 'unknown' for None."""
     if x is None:
         return "unknown"
     if unit == "pct":
@@ -318,6 +327,7 @@ def _fmt(x: Optional[float], unit: str) -> str:
 
 
 def _fmt_delta(m: Any) -> str:
+    """A metric delta formatted for its unit, with the relative change."""
     d = m.delta
     if d is None:
         return "–"
@@ -380,7 +390,9 @@ def render_comparison(cmp: Any, max_rows: int = 20) -> str:
             tb, tc = a["tokens"]
             cb, cc = a["cost_usd"]
             tok = f"{'-' if tb is None else f'{tb:,.0f}'} → {'-' if tc is None else f'{tc:,.0f}'}"
-            cost = f"{_money(cb) if a['status'] != 'added' else '-'} → {_money(cc) if a['status'] != 'removed' else '-'}"
+            before = _money(cb) if a['status'] != 'added' else '-'
+            after = _money(cc) if a['status'] != 'removed' else '-'
+            cost = f"{before} → {after}"
             lines.append(f"  {aid:<16}{a['status']:<9}{tok:>24}{cost:>24}")
 
     if cmp.warnings:
@@ -401,7 +413,8 @@ def render_trajectory(traj: Trajectory, max_events: int = 200) -> str:
     depth = {None: 0}
     for ev in traj.events[:max_events]:
         if ev.event_type == EventType.AGENT_START.value:
-            depth[ev.span_id] = depth.get(traj.spans[ev.span_id].parent_span_id if ev.span_id in traj.spans else None, 0) + 1
+            parent = traj.spans[ev.span_id].parent_span_id if ev.span_id in traj.spans else None
+            depth[ev.span_id] = depth.get(parent, 0) + 1
         boundary = ev.event_type in (EventType.AGENT_START.value, EventType.AGENT_END.value)
         indent = "  " * max(0, depth.get(ev.span_id, 0) - (1 if boundary else 0))
         et = ev.event_type

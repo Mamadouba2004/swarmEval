@@ -8,8 +8,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from swarmeval import (Benchmark, EvaluationResult, RunContext, RunInterrupted, SimClock, Task, compare, evaluate,
-                       evaluators as E, render_html)
+from swarmeval import (
+    Benchmark,
+    EvaluationResult,
+    RunContext,
+    RunInterrupted,
+    SimClock,
+    Task,
+    compare,
+    evaluate,
+    render_html,
+)
+from swarmeval import evaluators as E
 from swarmeval.cli import main
 from swarmeval.evaluate import analyze_runs
 from swarmeval.integrations.anthropic import instrument_client
@@ -32,11 +42,10 @@ def no_escape(fn, *args, **kwargs):
         pytest.fail("KeyboardInterrupt escaped: finished runs were lost")
 
 
-# -- audit 1: an interrupt keeps the finished runs ---------------------------- #
 def interrupt_at_t3(task, ctx):
     with ctx.agent("solo"):
         if task.task_id == "t3":
-            raise KeyboardInterrupt  # through an open span, as in a real Ctrl-C
+            raise KeyboardInterrupt
     return "42"
 
 
@@ -99,9 +108,8 @@ def test_cli_demo_returns_130_and_writes_outputs_on_interrupt(tmp_path, monkeypa
 @pytest.mark.parametrize("finished, run", [(2, "5"), (1, "1")])
 def test_interrupted_demo_skips_an_out_of_range_html_run_and_exits_130(tmp_path, monkeypatch, capsys,
                                                                         finished, run):
-    """PR #8 review round 2: --run passed the upfront check (8 planned runs), but
-    after an interrupt fewer runs exist; the outputs are kept and the exit code
-    still reports the interrupt."""
+    """--run passed the upfront check, but an interrupt left fewer runs: outputs are kept, no HTML is
+    written, and the exit code still reports the interrupt."""
     interrupt_demo_at_third_run(monkeypatch, at=finished + 1)
     code = no_escape(main, ["demo", "--trials", "1", "--out", str(tmp_path), "--html", str(tmp_path / "r.html"),
                             "--run", run])
@@ -139,9 +147,9 @@ def test_interrupted_header_and_per_trial_success_are_honest():
     partial trial's success rate was shown as if it were a full trial."""
     res = interrupted_in_second_trial()
     report = res.report()
-    header = next(l for l in report.splitlines() if "·" in l)
+    header = next(ln for ln in report.splitlines() if "·" in ln)
     assert "= 7 runs" not in header and "7/10 runs" in header
-    assert res.performance.per_trial == [1.0]  # the partial trial is excluded
+    assert res.performance.per_trial == [1.0]
     assert "per-trial success: 100.0%  (incomplete trial excluded)" in report
 
 
@@ -167,16 +175,15 @@ def test_uneven_trials_are_kept_unless_interrupted():
     """PR #8 review round 2: a merged set whose trials differ in size (not an
     interrupt) lost its short trial and was reported as incomplete."""
     runs = evaluate(lambda t, c: "42", five_tasks(), trials=2, clock_factory=SimClock).runs
-    runs.trajectories = runs.trajectories[:-1]  # trial 2 has 4 of the 5 tasks
+    runs.trajectories = runs.trajectories[:-1]
     res = analyze_runs(runs)
     assert res.performance.per_trial == [1.0, 1.0]
     assert "incomplete trial excluded" not in res.report()
     assert compute_performance(runs.trajectories, interrupted=True).per_trial == [1.0]
 
 
-# -- audit 2: a streamed call is not recorded as a $0 call -------------------- #
 def streaming_client(is_async=False):
-    stream = object()  # an SDK stream has no .usage or .content
+    stream = object()
 
     def create(**kw):
         return stream
@@ -195,9 +202,8 @@ def started_ctx():
 
 @pytest.mark.parametrize("is_async", [False, True])
 def test_bare_streamed_call_is_recorded_with_unknown_cost(is_async):
-    """PR #8 review round 2: passing a bare stream through unrecorded gave
-    llm_calls=0 and a complete $0.00 cost.  A stream has no usage yet, so it
-    is recorded as one call whose cost is unknown."""
+    """A bare stream has no usage yet, so it is recorded as one call of unknown cost rather than skipped
+    (which gave llm_calls=0 and a complete $0.00 cost)."""
     stream, client = streaming_client(is_async)
     ctx = started_ctx()
     with ctx.agent("a"):
@@ -251,7 +257,7 @@ def test_stream_inside_llm_call_marks_its_cost_unknown(is_async):
     traj = ctx.finish()
     (call,) = traj.llm_calls()
     assert call.cost_usd is None and not traj.cost_is_complete
-    assert not compute_efficiency(traj, PricingTable()).cost_complete  # re-pricing keeps it unknown
+    assert not compute_efficiency(traj, PricingTable()).cost_complete
 
 
 def streamed_swarm(stream=True):
@@ -266,16 +272,15 @@ def streamed_swarm(stream=True):
 
 
 def test_bare_streamed_call_marks_durations_incomplete():
-    """PR #8 review round 4: ``duration_unknown`` was write-only, so a streamed
-    call added 0 s to latency, work and the critical path and no report said
-    durations were incomplete."""
+    """A streamed call's unknown duration is reported as incomplete durations, not silently counted as
+    0 s of latency, work and critical path."""
     res = evaluate(streamed_swarm(), five_tasks(), clock_factory=SimClock)
     assert all(e.duration_complete is False and e.unknown_duration_calls == 1 for e in res.per_run)
     assert res.efficiency.duration_complete is False and res.efficiency.unknown_duration_calls == 5
     assert res.efficiency.to_dict()["duration_complete"] is False
     report, page = res.report(), render_html(res)
     assert "* durations incomplete: 5 streamed call(s) recorded with unknown duration" in report
-    assert "⚠ durations incomplete" in report  # also qualifies the COORDINATION numbers
+    assert "⚠ durations incomplete" in report
     assert page.count("durations incomplete") == 2
 
 
@@ -326,13 +331,12 @@ def test_streamed_call_estimate_includes_the_system_prompt():
     assert call.input_tokens == estimate_tokens(messages) + estimate_tokens(system)
 
 
-# -- audit 3: a crashing evaluator is visible --------------------------------- #
 def broken(task, output, traj):
     raise NameError("typo")
 
 
 def report_line(report, label):
-    (line,) = [l for l in report.splitlines() if label in l]
+    (line,) = [ln for ln in report.splitlines() if label in ln]
     return line
 
 
@@ -357,7 +361,7 @@ def test_evaluator_error_is_flagged_explicitly():
     for t in res.runs.trajectories:
         t.evaluation.details["reason"] = "crashed"
     assert analyze_runs(res.runs).performance.evaluator_errors == 5
-    for t in res.runs.trajectories:  # as saved before the flag existed (Phase 1: no schema version)
+    for t in res.runs.trajectories:
         t.metadata.pop("schema_version")
         t.evaluation.details = {"reason": "evaluator error: typo"}
     assert analyze_runs(res.runs).performance.evaluator_errors == 5
@@ -388,7 +392,6 @@ def test_reason_prefix_still_counts_on_phase1_runs_and_a_raise_on_v2_runs():
     assert res.performance.evaluator_errors == 1
 
 
-# -- audit 4: composite weights must match its evaluators --------------------- #
 def test_weight_count_mismatch_fails_before_any_run():
     spec = {"type": "composite", "weights": [1],
             "evaluators": [{"type": "exact_match", "expected": "a"}, {"type": "exact_match", "expected": "b"}]}
@@ -396,7 +399,6 @@ def test_weight_count_mismatch_fails_before_any_run():
         Benchmark("b", [Task("q", "what?", evaluator=spec)]).validate()
 
 
-# -- audit 5: the report box widens instead of cutting values ----------------- #
 def test_box_keeps_long_values_and_flags():
     value = "1,234,567  (in 1,000,000 / out 234,567)"
     out = box("SWARM EVALUATION", [("Tokens / Run", value, "⚠"), "short"])

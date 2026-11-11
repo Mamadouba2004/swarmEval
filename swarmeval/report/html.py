@@ -18,13 +18,24 @@ from __future__ import annotations
 import html
 import math
 import re
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Set, Tuple
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from ..graph.builder import ExecutionGraph, build_graph
 from ..graph.export import _edge_label, _inferred
 from ..schema import Event, Trajectory
-from .text import (CONTRIBUTION_NOTES, _money, _pct, _per_trial, _run_shape, _spread, coordination_caveats,
-                   coordination_rows, cost_notes, durations_note)
+from .text import (
+    CONTRIBUTION_NOTES,
+    _money,
+    _pct,
+    _per_trial,
+    _run_shape,
+    _spread,
+    coordination_caveats,
+    coordination_rows,
+    cost_notes,
+    durations_note,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..metrics.coordination import CoordinationMetrics
@@ -86,7 +97,8 @@ svg .tick.produce,svg .tick.use{stroke:var(--muted);stroke-width:1.5}
 svg .cp{stroke:var(--cp);stroke-width:2.5}
 svg .tick.cp{stroke-width:2}
 .sw.llm{background:var(--acc)}.sw.tool{background:var(--ok)}.sw.err{background:var(--bad)}
-.sw.wait{background:repeating-linear-gradient(45deg,var(--hatch) 0 2px,var(--card) 2px 5px);border:1px solid var(--hatch)}
+.sw.wait{background:repeating-linear-gradient(45deg,var(--hatch) 0 2px,var(--card) 2px 5px);
+  border:1px solid var(--hatch)}
 .sw.send{background:var(--warn)}.sw.receive{background:var(--muted)}
 .sw.cp{background:transparent;border:2.5px solid var(--cp)}
 .sw.message{background:var(--acc);height:3px}.sw.artifact{background:var(--ok);height:3px}
@@ -105,26 +117,31 @@ def _e(x: Any) -> str:
 
 
 def _short(text: str, n: int) -> str:
+    """Text cut to ``n`` characters with an ellipsis."""
     return text if len(text) <= n else text[:n - 1] + "…"
 
 
 def _tile(k: str, v: str, caption: str = "") -> str:
+    """HTML for one metric tile."""
     return (f'<div class="tile"><div class="k">{_e(k)}</div><div class="v">{_e(v)}</div>'
             f'<div class="c">{_e(caption)}</div></div>')
 
 
 def _tiles(tiles: Sequence[str]) -> str:
+    """HTML for a row of tiles."""
     return '<div class="tiles">' + "".join(tiles) + "</div>"
 
 
-def _bar(frac: Optional[float]) -> str:
+def _bar(frac: float | None) -> str:
+    """HTML for a percentage bar, or 'unknown'."""
     if frac is None:
         return "unknown"
     w = max(0.0, min(1.0, frac)) * 100
     return f'<span class="barwrap"><span class="bar" style="width:{w:.0f}%"></span></span>{frac * 100:.0f}%'
 
 
-def _legend(items: Sequence[Tuple[str, str]]) -> str:
+def _legend(items: Sequence[tuple[str, str]]) -> str:
+    """HTML for a legend of swatches and labels."""
     return '<div class="legend">' + "".join(f'<span><span class="sw {c}"></span>{_e(t)}</span>'
                                             for c, t in items) + "</div>"
 
@@ -132,45 +149,41 @@ def _legend(items: Sequence[Tuple[str, str]]) -> str:
 _DEF = re.compile(r"^(.*?) \((.*)\)$")
 
 
-def _split_label(label: str) -> Tuple[str, str]:
+def _split_label(label: str) -> tuple[str, str]:
     """``"Actual Parallelism (work ÷ wall)"`` -> name and its definition."""
     m = _DEF.match(label.strip())
     return (m.group(1), m.group(2)) if m else (label.strip(), "")
 
 
-# --------------------------------------------------------------------------- #
-# SVG: agent graph
-# --------------------------------------------------------------------------- #
 _NODE_W, _NODE_H, _COL_W, _ROW_H, _PAD = 160, 50, 230, 84, 24
 
 
-def _first_start(traj: Trajectory, agents: Sequence[str]) -> Dict[str, float]:
-    out: Dict[str, float] = {}
+def _first_start(traj: Trajectory, agents: Sequence[str]) -> dict[str, float]:
+    """Each agent's first span start, infinity for agents that never ran."""
+    out: dict[str, float] = {}
     for a in agents:
         spans = traj.spans_for(a)
         out[a] = min(s.start for s in spans) if spans else math.inf
     return out
 
 
-def _layout(graph: ExecutionGraph, first: Dict[str, float]) -> Dict[str, Tuple[float, float]]:
-    """Columns by dependency rank: an agent sits one column right of the
-    latest earlier-starting agent with an edge into it, so the flow reads
-    left to right.  Edges into an agent from later-starting agents (replies)
-    are ignored for ranking, which keeps the ranking acyclic."""
+def _layout(graph: ExecutionGraph, first: dict[str, float]) -> dict[str, tuple[float, float]]:
+    """Columns by dependency rank: an agent sits one column right of the latest earlier-starting agent
+    with an edge into it, so the flow reads left to right (replies are ignored for ranking)."""
     order = sorted(graph.agents, key=lambda a: (first[a], a))
-    preds: Dict[str, Set[str]] = {a: set() for a in order}
+    preds: dict[str, set[str]] = {a: set() for a in order}
     for e in graph.agent_edges:
         s, t = e.source, e.target
         if s != t and s in preds and t in preds and (first[s], s) < (first[t], t):
             preds[t].add(s)
-    rank: Dict[str, int] = {}
+    rank: dict[str, int] = {}
     for a in order:
         rank[a] = max([rank[p] + 1 for p in preds[a] if p in rank] or [0])
-    cols: Dict[int, List[str]] = {}
+    cols: dict[int, list[str]] = {}
     for a in order:
         cols.setdefault(rank[a], []).append(a)
     nrows = max(len(v) for v in cols.values())
-    pos: Dict[str, Tuple[float, float]] = {}
+    pos: dict[str, tuple[float, float]] = {}
     for r, names in cols.items():
         off = (nrows - len(names)) * _ROW_H / 2
         for i, a in enumerate(names):
@@ -179,7 +192,7 @@ def _layout(graph: ExecutionGraph, first: Dict[str, float]) -> Dict[str, Tuple[f
 
 
 def _edge_clear(sx: float, sy: float, tx: float, ty: float, qx: float, qy: float,
-                pos: Dict[str, Tuple[float, float]], skip: Tuple[str, str]) -> bool:
+                pos: dict[str, tuple[float, float]], skip: tuple[str, str]) -> bool:
     """True when the clipped quadratic curve stays out of every node box but its own ends."""
     x1, y1 = _clip(sx, sy, qx, qy)
     x2, y2 = _clip(tx, ty, qx, qy)
@@ -193,7 +206,7 @@ def _edge_clear(sx: float, sy: float, tx: float, ty: float, qx: float, qy: float
     return True
 
 
-def _clip(cx: float, cy: float, tx: float, ty: float) -> Tuple[float, float]:
+def _clip(cx: float, cy: float, tx: float, ty: float) -> tuple[float, float]:
     """Point where the ray from a node centre towards (tx, ty) leaves the node box."""
     dx, dy = tx - cx, ty - cy
     if dx == 0 and dy == 0:
@@ -204,20 +217,18 @@ def _clip(cx: float, cy: float, tx: float, ty: float) -> Tuple[float, float]:
     return cx + dx * s, cy + dy * s
 
 
-def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: Optional["CoordinationMetrics"] = None) -> str:
-    """Agent graph of one run as inline SVG plus its legend.  Edge style
-    follows ``graph.export``: dashed when message delivery was inferred from
-    timing (or never happened); stroke width grows with tokens."""
+def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: CoordinationMetrics | None = None) -> str:
+    """Agent graph of one run as inline SVG plus legend; edges are dashed when delivery was inferred or
+    never happened, and grow with tokens."""
     agents = list(graph.agents)
     if not agents:
         return '<p class="note">no agents recorded</p>'
     first = _first_start(traj, agents)
     pos = _layout(graph, first)
-    # bounding box of nodes and curve midpoints; the viewBox is fitted at the end
     xs = [x for x, _ in pos.values()] + [x + _NODE_W for x, _ in pos.values()]
     ys = [y for _, y in pos.values()] + [y + _NODE_H for _, y in pos.values()]
     inferred = _inferred(graph)
-    undelivered: Dict[Tuple[str, str], int] = {}
+    undelivered: dict[tuple[str, str], int] = {}
     for m in graph.messages:
         if m.receive_node is None and m.sender is not None and m.receiver is not None:
             undelivered[(m.sender, m.receiver)] = undelivered.get((m.sender, m.receiver), 0) + 1
@@ -235,12 +246,6 @@ def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: Optional["Coordinatio
             continue
         kind = e.kind if e.kind in _KIND_ORDER else "invocation"
         (sx, sy), (tx, ty) = centre[e.source], centre[e.target]
-        # Bend each edge to its left by an amount set by its kind: the reply
-        # edge (opposite direction) bends the other way and parallel kinds
-        # fan out, so no two edges of a pair overlap.
-        # Edges that skip columns bend further; any edge whose default curve
-        # still crosses another agent's box searches signed bends of growing
-        # magnitude for the first one that clears every box.
         dx, dy = tx - sx, ty - sy
         length = math.hypot(dx, dy) or 1.0
         skipped = max(0, int(round(abs(dx) / _COL_W)) - 1)
@@ -264,7 +269,6 @@ def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: Optional["Coordinatio
         n_inf = inferred.get((e.source, e.target, e.kind), 0)
         n_lost = undelivered.get((e.source, e.target), 0) if e.kind == "message" else 0
         width = min(6.0, 1.0 + 5.0 * e.tokens / max_tok)
-        # never-delivered messages are also delivery-inferred; count each once
         tip = _edge_label(e.kind, e.count, e.tokens, n_inf - n_lost)
         tip = f"{e.source} → {e.target}: {tip}"
         if e.kind == "message":
@@ -323,10 +327,8 @@ def graph_svg(traj: Trajectory, graph: ExecutionGraph, cm: Optional["Coordinatio
     return '<div class="panel">' + "".join(parts) + "</div>" + legend + "".join(notes)
 
 
-# --------------------------------------------------------------------------- #
-# SVG: timeline
-# --------------------------------------------------------------------------- #
-def _unit_tip(kind: str, ev: Optional[Event], start: float, end: float, t0: float) -> str:
+def _unit_tip(kind: str, ev: Event | None, start: float, end: float, t0: float) -> str:
+    """Tooltip text for a timeline unit."""
     tip = f"{kind} @ {start - t0:.2f}s"
     if kind in ("llm", "tool", "wait"):
         tip += f", {end - start:.2f}s"
@@ -345,10 +347,9 @@ def _unit_tip(kind: str, ev: Optional[Event], start: float, end: float, t0: floa
     return tip
 
 
-def timeline_svg(traj: Trajectory, graph: ExecutionGraph, critical: Optional[Set[str]] = None) -> str:
-    """One row per span: LLM/tool calls as bars (nested calls thinner),
-    waits hatched, message sends/receives as ticks; units on the critical
-    path get ``class="cp"``."""
+def timeline_svg(traj: Trajectory, graph: ExecutionGraph, critical: set[str] | None = None) -> str:
+    """One row per span: LLM/tool calls as bars (nested ones thinner), waits hatched, sends and receives
+    as ticks; units on the critical path get ``class="cp"``."""
     critical = critical or set()
     spans = sorted(traj.spans.values(), key=lambda s: (s.start, s.agent_id, s.span_id))
     if not spans and not graph.units:
@@ -358,10 +359,10 @@ def timeline_svg(traj: Trajectory, graph: ExecutionGraph, critical: Optional[Set
     t0 = traj.started_at if traj.started_at is not None else min(starts)
     t_end = max(ends + [t0 + traj.duration])
     total = max(t_end - t0, 1e-6)
-    by_span: Dict[Optional[str], List[Any]] = {}
+    by_span: dict[str | None, list[Any]] = {}
     for u in graph.units:
         by_span.setdefault(u.span_id if u.span_id in traj.spans else None, []).append(u)
-    rows: List[Tuple[str, str, Any]] = [(s.span_id, s.agent_id, s) for s in spans]
+    rows: list[tuple[str, str, Any]] = [(s.span_id, s.agent_id, s) for s in spans]
     if by_span.get(None):
         rows.append(("", "(no span)", None))
     events = {ev.event_id: ev for ev in traj.events}
@@ -401,11 +402,13 @@ def timeline_svg(traj: Trajectory, graph: ExecutionGraph, critical: Optional[Set
                 parts.append(f'<rect class="u {u.kind}{err}{cp}" x="{x0:.1f}" y="{by}" '
                              f'width="{max(1.5, X(u.end) - x0):.1f}" height="{bh}" rx="2"><title>{tip}</title></rect>')
             elif u.kind == "send":
-                parts.append(f'<path class="tick send{cp}" d="M{x0:.1f},{y} l4,5 l-4,5 l-4,-5 z"><title>{tip}</title></path>')
+                parts.append(f'<path class="tick send{cp}" d="M{x0:.1f},{y} l4,5 l-4,5 l-4,-5 z">'
+                             f'<title>{tip}</title></path>')
             elif u.kind == "receive":
                 yb = y + row_h - 4
-                parts.append(f'<path class="tick receive{cp}" d="M{x0:.1f},{yb - 7} l4,7 l-8,0 z"><title>{tip}</title></path>')
-            else:  # produce / use: thin tick
+                parts.append(f'<path class="tick receive{cp}" d="M{x0:.1f},{yb - 7} l4,7 l-8,0 z">'
+                             f'<title>{tip}</title></path>')
+            else:
                 parts.append(f'<line class="tick {u.kind}{cp}" x1="{x0:.1f}" y1="{y + 3}" x2="{x0:.1f}" '
                              f'y2="{y + row_h - 5}"><title>{tip}</title></line>')
     parts.append("</svg>")
@@ -415,10 +418,8 @@ def timeline_svg(traj: Trajectory, graph: ExecutionGraph, critical: Optional[Set
     return '<div class="panel scroll">' + "".join(parts) + "</div>" + legend
 
 
-# --------------------------------------------------------------------------- #
-# Sections
-# --------------------------------------------------------------------------- #
-def _phase1(result: Any) -> List[str]:
+def _phase1(result: Any) -> list[str]:
+    """HTML sections for performance and efficiency."""
     perf, eff = result.performance, result.efficiency
     n_runs = len(result.runs)
     perf_tiles = [_tile("Task Success", _pct(perf.success_rate), f"{perf.n_successes}/{n_runs} runs"),
@@ -470,10 +471,11 @@ def _phase1(result: Any) -> List[str]:
     return out
 
 
-def _coordination_tiles(cs: Any, eff: Any = None) -> List[str]:
+def _coordination_tiles(cs: Any, eff: Any = None) -> list[str]:
+    """HTML tiles for the coordination rows."""
     out = ["<h2>Coordination</h2>",
            f'<p class="sub">{cs.n_runs} runs · values are means over runs (range)</p>']
-    group: List[str] = []
+    group: list[str] = []
     for row in coordination_rows(cs) + [None]:
         if row is None:
             if group:
@@ -487,7 +489,8 @@ def _coordination_tiles(cs: Any, eff: Any = None) -> List[str]:
     return out
 
 
-def _run_views(result: Any, run_index: int) -> List[str]:
+def _run_views(result: Any, run_index: int) -> list[str]:
+    """HTML agent graph and timeline of one run."""
     traj = result.runs.trajectories[run_index]
     per_run = result.per_run_coordination
     cm = per_run[run_index] if per_run is not None and run_index < len(per_run) else None
@@ -495,7 +498,7 @@ def _run_views(result: Any, run_index: int) -> List[str]:
     status = "succeeded" if traj.succeeded else "failed"
     head = (f'<span class="badge">run {run_index}: task {_e(traj.task_id)} · trial {_e(traj.trial)} · '
             f"{_e(status)}</span>")
-    out: List[str] = []
+    out: list[str] = []
     if cm is not None:
         out += [f"<h2>Agent graph {head}</h2>", graph_svg(traj, graph, cm)]
         cov = graph.coverage.message_receive_coverage
@@ -512,7 +515,8 @@ def _run_views(result: Any, run_index: int) -> List[str]:
     return out
 
 
-def _contribution(cs: Any) -> List[str]:
+def _contribution(cs: Any) -> list[str]:
+    """HTML table of observed contribution per agent."""
     if not cs.contribution:
         return []
     out = ["<h2>Observed contribution (provenance, not marginal effect)</h2>",
@@ -536,7 +540,8 @@ def _contribution(cs: Any) -> List[str]:
     return out
 
 
-def _diagnostics(cs: Any) -> List[str]:
+def _diagnostics(cs: Any) -> list[str]:
+    """HTML list of smells with their prevalence."""
     diag = cs.diagnostics
     if diag is None:
         return []
@@ -559,19 +564,15 @@ def _diagnostics(cs: Any) -> List[str]:
     return out
 
 
-# --------------------------------------------------------------------------- #
-# Main renderer
-# --------------------------------------------------------------------------- #
-def render_html(result: Any, path: Optional[str] = None, run_index: int = 0) -> str:
-    """The whole report as one HTML document; also written to ``path`` when
-    given.  ``run_index`` picks the run whose agent graph and timeline are
-    drawn (the other sections cover all runs)."""
+def render_html(result: Any, path: str | None = None, run_index: int = 0) -> str:
+    """The whole report as one HTML document, also written to ``path`` when given; ``run_index`` picks the
+    run whose agent graph and timeline are drawn."""
     n_runs = len(result.runs)
     if n_runs and not 0 <= run_index < n_runs:
         raise ValueError(f"run_index {run_index} out of range (result has {n_runs} runs)")
     perf = result.performance
     title = f"SwarmEval · {result.label}"
-    body: List[str] = [
+    body: list[str] = [
         f"<h1>{_e(title)}</h1>",
         f'<div class="sub">{_e(result.benchmark)} · {_e(_run_shape(result))} · '
         "health dimensions are reported separately; there is no overall score</div>",

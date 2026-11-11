@@ -240,6 +240,7 @@ swarmeval/
   stats.py         descriptive statistics
   cli.py
 tests/
+tools/check_comments.py   comment-rule checker (run by tests/test_style.py and CI)
 ```
 
 ## Development
@@ -250,3 +251,20 @@ docker run --rm -v "$PWD":/w -w /w python:3.12-slim \
 ```
 
 The Parquet tests skip when `pyarrow` is not installed.
+
+### Lint and comment rules
+
+```bash
+ruff check .                     # style, imports, modern typing (config in pyproject.toml)
+ruff check . --fix               # apply the safe fixes
+python tools/check_comments.py   # comment rules
+```
+
+Both also run as part of `pytest` (`tests/test_style.py`; the ruff test skips when ruff is not installed) and in CI.
+
+Comments are kept to what a reader needs:
+
+* every file opens with an overview docstring (classes are described there, not in class docstrings);
+* every module- or class-level function outside `tests/` has a 1-2 line docstring summary (dunder methods are exempt);
+* nothing else: no `#` comments except tool directives (`# noqa`, `# type:`, `# pragma:`, `# fmt:`, `# pyright:`),
+  and no stray string statements.

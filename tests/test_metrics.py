@@ -52,7 +52,6 @@ def test_efficiency_counts_tokens_calls_and_cost():
     assert eff.input_tokens == 100 + 3 * 200 + 5000
     assert eff.output_tokens == 50 + 3 * 100 + 300
     assert eff.total_tokens == eff.input_tokens + eff.output_tokens
-    # opus: 5/25 per 1M; sonnet: 2/10 per 1M
     expected_cost = (100 * 5 + 50 * 25) / 1e6 + 3 * (200 * 2 + 100 * 10) / 1e6 + (5000 * 5 + 300 * 25) / 1e6
     assert eff.cost_usd == pytest.approx(expected_cost) and eff.cost_complete
     assert eff.per_agent["synthesizer"].input_tokens == 5000
@@ -64,12 +63,9 @@ def test_efficiency_counts_tokens_calls_and_cost():
 def test_efficiency_timing_parallel_vs_sequential():
     par = compute_efficiency(fan_out_trajectory(parallel=True))
     seq = compute_efficiency(fan_out_trajectory(parallel=False))
-    # coordinator 1.0 + one worker (0.5 + 2.0) + synthesizer (0.5 wait + 3.0)
     assert par.wall_clock_s == pytest.approx(7.0)
     assert seq.wall_clock_s == pytest.approx(1.0 + 3 * 2.5 + 3.5)
-    # aggregate agent time is the same either way
     assert par.agent_time_s == pytest.approx(seq.agent_time_s) == pytest.approx(1.0 + 7.5 + 3.5)
-    # the synthesizer's explicit wait shows up as idle time
     assert par.waiting_time_s == pytest.approx(0.5)
     assert par.per_agent["synthesizer"].busy_time_s == pytest.approx(3.0)
 
@@ -120,7 +116,7 @@ def test_analyze_runs_summary_and_cost_per_success():
     res = analyze_runs(RunSet("lbl", "bench", trajs))
     assert res.success_rate == 0.5
     assert res.cost["total"] == pytest.approx(sum(t.cost_usd for t in trajs))
-    assert res.cost["per_success"] == pytest.approx(res.cost["total"])  # one success
+    assert res.cost["per_success"] == pytest.approx(res.cost["total"])
     assert res.agents == ["coordinator", "a", "b", "c", "synthesizer"]
     s = res.summary()
     assert s["runs"] == 2 and s["label"] == "lbl" and s["tasks"] == 2

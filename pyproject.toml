@@ -23,13 +23,30 @@ dependencies = []
 anthropic = ["anthropic>=0.40"]
 parquet = ["pyarrow>=14"]
 embeddings = ["sentence-transformers>=2.2"]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "ruff>=0.6"]
 
 [project.scripts]
 swarmeval = "swarmeval.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["swarmeval*"]  # the demo swarm ships as swarmeval.examples
+include = ["swarmeval*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["worktrees"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # import sorting
+    "UP",  # pyupgrade: deprecated typing forms and syntax
+    "B",   # bugbear
+]
+# StrEnum changes str()/format() of members, which recorded data relies on
+ignore = ["UP042"]

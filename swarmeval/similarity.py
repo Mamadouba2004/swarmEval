@@ -15,6 +15,19 @@ Redundancy needs "are these two texts saying the same thing?".  Two backends:
 Anything with ``name``, ``threshold``, ``candidates(texts)`` and
 ``scores(texts, pairs)`` can be passed instead; ``resolve_similarity`` turns a
 name, an import path (``"pkg.module:attr"``) or an instance into one.
+
+Classes:
+- Similarity: A similarity backend. ``candidates`` yields index pairs ``(i, j)`` with ``i < j`` worth scoring;
+  ``scores`` returns one score in [0, 1] per pair (higher = more similar); pairs scoring ``>= threshold`` count as
+  similar.
+- LexicalSimilarity: Jaccard similarity of lowercase word ``shingle``-grams. A pair where either text has fewer than
+  ``shingle`` words is compared on word sets instead (a 2-word text has no 3-shingles to share). Candidates are
+  capped at ``max_pairs`` (``truncated`` is then True and later pairs are not compared, so redundancy can be under-
+  counted).
+- EmbeddingSimilarity: Cosine similarity of embeddings. ``embed_fn(list_of_texts) -> list_of_vectors``; without one,
+  ``sentence-transformers`` must be installed (checked here, ImportError otherwise) and is imported on first use,
+  when ``model`` is loaded. Every pair is a candidate, capped at ``max_pairs`` (``truncated`` is then True and later
+  pairs are not compared, so redundancy can be under-counted).
 """
 from __future__ import annotations
 
@@ -24,54 +37,50 @@ import inspect
 import math
 import re
 from collections import defaultdict
-from typing import (Any, Callable, Dict, FrozenSet, Iterable, Iterator, List, Optional, Protocol, Sequence, Set, Tuple,
-                    runtime_checkable)
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from typing import (
+    Any,
+    Protocol,
+    runtime_checkable,
+)
 
-Pair = Tuple[int, int]
+Pair = tuple[int, int]
 _WORD = re.compile(r"\w+")
 
 
 @runtime_checkable
 class Similarity(Protocol):
-    """A similarity backend.  ``candidates`` yields index pairs ``(i, j)``
-    with ``i < j`` worth scoring; ``scores`` returns one score in [0, 1] per
-    pair (higher = more similar); pairs scoring ``>= threshold`` count as
-    similar."""
     name: str
     threshold: float
 
-    def candidates(self, texts: Sequence[str]) -> Iterable[Pair]: ...
+    def candidates(self, texts: Sequence[str]) -> Iterable[Pair]:
+        """Index pairs ``(i, j)`` with ``i < j`` worth scoring."""
 
-    def scores(self, texts: Sequence[str], pairs: Sequence[Pair]) -> List[float]: ...
+    def scores(self, texts: Sequence[str], pairs: Sequence[Pair]) -> list[float]:
+        """One score in [0, 1] per pair, higher meaning more similar."""
 
 
-def similar_pairs(sim: Any, texts: Sequence[str]) -> List[Tuple[int, int, float]]:
+def similar_pairs(sim: Any, texts: Sequence[str]) -> list[tuple[int, int, float]]:
     """All candidate pairs scoring at or above the backend's threshold."""
     pairs = list(sim.candidates(texts))
     if not pairs:
         return []
-    return [(i, j, s) for (i, j), s in zip(pairs, sim.scores(texts, pairs)) if s >= sim.threshold]
+    return [(i, j, s) for (i, j), s in zip(pairs, sim.scores(texts, pairs), strict=True) if s >= sim.threshold]
 
 
-# --------------------------------------------------------------------------- #
-# Lexical
-# --------------------------------------------------------------------------- #
-def words(text: str) -> List[str]:
+def words(text: str) -> list[str]:
+    """Lowercase words of ``text``."""
     return _WORD.findall(text.lower())
 
 
-def jaccard(a: Set[Any], b: Set[Any]) -> float:
+def jaccard(a: set[Any], b: set[Any]) -> float:
+    """Jaccard similarity of two sets, 1.0 when both are empty."""
     if not a and not b:
-        return 1.0   # two empty texts are identical
+        return 1.0
     return len(a & b) / len(a | b)
 
 
 class LexicalSimilarity:
-    """Jaccard similarity of lowercase word ``shingle``-grams.  A pair where
-    either text has fewer than ``shingle`` words is compared on word sets
-    instead (a 2-word text has no 3-shingles to share).  Candidates are capped
-    at ``max_pairs`` (``truncated`` is then True and later pairs are not
-    compared, so redundancy can be under-counted)."""
     name = "lexical"
 
     def __init__(self, threshold: float = 0.6, shingle: int = 3, max_pairs: int = 200000) -> None:
@@ -82,7 +91,8 @@ class LexicalSimilarity:
         self.max_pairs = max_pairs
         self.truncated = False
 
-    def _features(self, texts: Sequence[str]) -> Tuple[List[Set[str]], List[FrozenSet[Tuple[str, ...]]]]:
+    def _features(self, texts: Sequence[str]) -> tuple[list[set[str]], list[frozenset[tuple[str, ...]]]]:
+        """Word sets and shingle sets of each text."""
         uni, shingles = [], []
         k = self.shingle
         for t in texts:
@@ -93,13 +103,14 @@ class LexicalSimilarity:
         return uni, shingles
 
     def similarity(self, a: str, b: str) -> float:
+        """Similarity of two texts."""
         return self.scores([a, b], [(0, 1)])[0]
 
-    def candidates(self, texts: Sequence[str]) -> List[Pair]:
+    def candidates(self, texts: Sequence[str]) -> list[Pair]:
         """Pairs sharing at least one shingle (or, involving a short text, one
         word), found through an inverted index rather than all pairs."""
         uni, shingles = self._features(texts)
-        by_shingle: Dict[Tuple[str, ...], List[int]] = defaultdict(list)
+        by_shingle: dict[tuple[str, ...], list[int]] = defaultdict(list)
         for i, sh in enumerate(shingles):
             for s in sh:
                 by_shingle[s].append(i)
@@ -111,7 +122,7 @@ class LexicalSimilarity:
                         yield (posting[x], posting[y])
             short = [i for i, sh in enumerate(shingles) if not sh and uni[i]]
             if short:
-                by_word: Dict[str, List[int]] = defaultdict(list)
+                by_word: dict[str, list[int]] = defaultdict(list)
                 for i, ws in enumerate(uni):
                     for w in ws:
                         by_word[w].append(i)
@@ -122,7 +133,7 @@ class LexicalSimilarity:
                                 yield (min(i, j), max(i, j))
 
         self.truncated = False
-        out: Set[Pair] = set()
+        out: set[Pair] = set()
         for pair in generate():
             if len(out) >= self.max_pairs and pair not in out:
                 self.truncated = True
@@ -130,7 +141,8 @@ class LexicalSimilarity:
             out.add(pair)
         return sorted(out)
 
-    def scores(self, texts: Sequence[str], pairs: Sequence[Pair]) -> List[float]:
+    def scores(self, texts: Sequence[str], pairs: Sequence[Pair]) -> list[float]:
+        """One similarity per pair: shingle Jaccard, or word-set Jaccard for short texts."""
         uni, shingles = self._features(texts)
         out = []
         for i, j in pairs:
@@ -144,11 +156,9 @@ class LexicalSimilarity:
         return f"LexicalSimilarity(threshold={self.threshold}, shingle={self.shingle}, max_pairs={self.max_pairs})"
 
 
-# --------------------------------------------------------------------------- #
-# Embeddings
-# --------------------------------------------------------------------------- #
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
+    """Cosine similarity of two vectors, 0.0 when either is zero."""
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     return dot / (na * nb) if na and nb else 0.0
@@ -158,25 +168,20 @@ _NEEDS_ST = "EmbeddingSimilarity needs sentence-transformers: pip install 'swarm
 
 
 class EmbeddingSimilarity:
-    """Cosine similarity of embeddings.  ``embed_fn(list_of_texts) ->
-    list_of_vectors``; without one, ``sentence-transformers`` must be
-    installed (checked here, ImportError otherwise) and is imported on first
-    use, when ``model`` is loaded.  Every pair is a candidate, capped at
-    ``max_pairs`` (``truncated`` is then True and later pairs are not
-    compared, so redundancy can be under-counted)."""
     name = "embeddings"
 
-    def __init__(self, embed_fn: Optional[Callable[[List[str]], Sequence[Sequence[float]]]] = None,
+    def __init__(self, embed_fn: Callable[[list[str]], Sequence[Sequence[float]]] | None = None,
                  model: str = "all-MiniLM-L6-v2", threshold: float = 0.85, max_pairs: int = 5000) -> None:
         if embed_fn is None and importlib.util.find_spec("sentence_transformers") is None:
-            raise ImportError(_NEEDS_ST)  # fail before any run, not after them all; the import itself stays lazy
+            raise ImportError(_NEEDS_ST)
         self.embed_fn = embed_fn
         self.model = model
         self.threshold = threshold
         self.max_pairs = max_pairs
         self.truncated = False
 
-    def _embedder(self) -> Callable[[List[str]], Sequence[Sequence[float]]]:
+    def _embedder(self) -> Callable[[list[str]], Sequence[Sequence[float]]]:
+        """The embedding function, loading sentence-transformers on first use."""
         if self.embed_fn is None:
             try:
                 from sentence_transformers import SentenceTransformer
@@ -186,8 +191,9 @@ class EmbeddingSimilarity:
             self.embed_fn = lambda texts: [[float(x) for x in v] for v in st.encode(list(texts))]
         return self.embed_fn
 
-    def candidates(self, texts: Sequence[str]) -> List[Pair]:
-        out: List[Pair] = []
+    def candidates(self, texts: Sequence[str]) -> list[Pair]:
+        """All index pairs, capped at ``max_pairs``."""
+        out: list[Pair] = []
         n = len(texts)
         self.truncated = False
         for i in range(n):
@@ -198,12 +204,12 @@ class EmbeddingSimilarity:
                 out.append((i, j))
         return out
 
-    def scores(self, texts: Sequence[str], pairs: Sequence[Pair]) -> List[float]:
+    def scores(self, texts: Sequence[str], pairs: Sequence[Pair]) -> list[float]:
+        """Cosine similarity per pair, embedding each distinct text once."""
         if not pairs:
             return []
-        # embed each distinct text needed once per call
         needed = sorted({i for p in pairs for i in p})
-        uniq: Dict[str, int] = {}
+        uniq: dict[str, int] = {}
         for i in needed:
             uniq.setdefault(texts[i], len(uniq))
         vecs = list(self._embedder()(list(uniq)))
@@ -215,21 +221,18 @@ class EmbeddingSimilarity:
                 f"max_pairs={self.max_pairs}, custom_embed_fn={self.embed_fn is not None})")
 
 
-# --------------------------------------------------------------------------- #
-# Resolution
-# --------------------------------------------------------------------------- #
-SIMILARITIES: Dict[str, Callable[[], Any]] = {"lexical": LexicalSimilarity, "embeddings": EmbeddingSimilarity}
+SIMILARITIES: dict[str, Callable[[], Any]] = {"lexical": LexicalSimilarity, "embeddings": EmbeddingSimilarity}
 
 
 def _is_similarity(obj: Any) -> bool:
+    """True if ``obj`` is an instance with the similarity backend interface."""
     return (not inspect.isclass(obj) and callable(getattr(obj, "candidates", None))
             and callable(getattr(obj, "scores", None)) and hasattr(obj, "threshold"))
 
 
 def resolve_similarity(spec: Any = None) -> Any:
-    """``None`` -> ``LexicalSimilarity()``; a registry name (``"lexical"``,
-    ``"embeddings"``); ``"pkg.module:attr"`` naming an instance, or a class /
-    factory callable with no required arguments; or a similarity instance."""
+    """A similarity backend from ``None`` (lexical), a registry name, a ``"pkg.module:attr"`` path to an
+    instance or argument-free class/factory, or an instance."""
     if spec is None:
         return LexicalSimilarity()
     if _is_similarity(spec):

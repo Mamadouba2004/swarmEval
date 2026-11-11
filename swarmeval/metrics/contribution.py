@@ -12,12 +12,29 @@ recording of use.  Each agent therefore gets a ``provenance_coverage``: the
 share of its outputs whose possible consumers record what they use.  ``dead``
 is True only when nothing was used *and* that coverage is complete; with
 partial coverage it is ``None`` (unknown), never True.
+
+Classes:
+- AgentUtilization: An agent's share of the run's activity. Shares are ``None`` when the run had none of that
+  activity at all. ``busy_share`` is the agent's time inside its own LLM/tool calls over all agents' such time.
+  ``downstream_refs`` counts distinct (artifact, consuming agent) pairs for the agent's artifacts, other agents
+  only.
+- Lineage: Artifacts the final output was (transitively) derived from. ``inferred`` holds those reached only through
+  artifacts without recorded ``derived_from``, whose inputs were approximated by what the producing span consumed
+  before producing them.
+- ObservedContribution: Where an agent's outputs were observed to go (provenance, not marginal effect). ``status``
+  is the strongest of, in order: * ``in_final_lineage`` -- produced an artifact the final output derives from; *
+  ``consumed_downstream`` -- another agent consumed one of its artifacts; * ``delivered_only`` -- its
+  messages/artifacts reached other agents, none of its artifacts was consumed; * ``unused`` -- it had outputs but
+  none reached another agent; * ``unknown`` -- it sent no message and produced no artifact, so there is nothing to
+  trace. ``dead`` is True only when nothing it sent was used, provenance coverage is complete and it did not produce
+  the final output; False when some use was observed; ``None`` when that cannot be told.
 """
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 from ..graph.builder import EPS, ExecutionGraph, build_graph
 from ..schema import EventType, Trajectory
@@ -27,36 +44,30 @@ from .efficiency import EfficiencyMetrics, compute_efficiency
 STATUSES = ("in_final_lineage", "consumed_downstream", "delivered_only", "unused", "unknown")
 
 
-# --------------------------------------------------------------------------- #
-# Utilization
-# --------------------------------------------------------------------------- #
 @dataclass
 class AgentUtilization:
-    """An agent's share of the run's activity.  Shares are ``None`` when the
-    run had none of that activity at all.  ``busy_share`` is the agent's time
-    inside its own LLM/tool calls over all agents' such time.
-    ``downstream_refs`` counts distinct (artifact, consuming agent) pairs for
-    the agent's artifacts, other agents only."""
     agent_id: str
-    role: Optional[str] = None
-    token_share: Optional[float] = None
-    llm_call_share: Optional[float] = None
-    tool_call_share: Optional[float] = None
-    busy_share: Optional[float] = None
+    role: str | None = None
+    token_share: float | None = None
+    llm_call_share: float | None = None
+    tool_call_share: float | None = None
+    busy_share: float | None = None
     messages_sent: int = 0
     artifacts_produced: int = 0
     downstream_refs: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """The record as a JSON-ready dict."""
         return asdict(self)
 
 
-def _share(part: float, total: float) -> Optional[float]:
+def _share(part: float, total: float) -> float | None:
+    """``part`` over ``total``, None when the total is zero."""
     return part / total if total else None
 
 
-def compute_utilization(traj: Trajectory, graph: Optional[ExecutionGraph] = None,
-                        efficiency: Optional[EfficiencyMetrics] = None) -> Dict[str, AgentUtilization]:
+def compute_utilization(traj: Trajectory, graph: ExecutionGraph | None = None,
+                        efficiency: EfficiencyMetrics | None = None) -> dict[str, AgentUtilization]:
     """Per-agent utilization, built on the efficiency layer's per-agent
     counts and busy time (``union_length`` of each span's calls)."""
     graph = graph or build_graph(traj)
@@ -66,12 +77,12 @@ def compute_utilization(traj: Trajectory, graph: Optional[ExecutionGraph] = None
     llm = sum(a.llm_calls for a in per.values())
     tools = sum(a.tool_calls for a in per.values())
     busy = sum(a.busy_time_s for a in per.values())
-    refs: Dict[str, int] = defaultdict(int)
+    refs: dict[str, int] = defaultdict(int)
     for art_id, consumers in graph.artifact_consumers.items():
         art = traj.artifacts.get(art_id)
         if art is not None and art.producer is not None:
             refs[art.producer] += sum(1 for c in consumers if c != art.producer)
-    out: Dict[str, AgentUtilization] = {}
+    out: dict[str, AgentUtilization] = {}
     for aid in graph.agents:
         a = per.get(aid)
         if a is None:
@@ -83,25 +94,19 @@ def compute_utilization(traj: Trajectory, graph: Optional[ExecutionGraph] = None
     return out
 
 
-# --------------------------------------------------------------------------- #
-# Final-output lineage
-# --------------------------------------------------------------------------- #
 @dataclass
 class Lineage:
-    """Artifacts the final output was (transitively) derived from.
-    ``inferred`` holds those reached only through artifacts without recorded
-    ``derived_from``, whose inputs were approximated by what the producing
-    span consumed before producing them."""
-    artifacts: List[str] = field(default_factory=list)
-    inferred: List[str] = field(default_factory=list)
+    artifacts: list[str] = field(default_factory=list)
+    inferred: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """The lineage as a JSON-ready dict."""
         return asdict(self)
 
 
-def _span_consumption(traj: Trajectory) -> Dict[str, List[Tuple[float, str]]]:
+def _span_consumption(traj: Trajectory) -> dict[str, list[tuple[float, str]]]:
     """span id -> (time, artifact id) for everything the span genuinely used."""
-    used: Dict[str, List[Tuple[float, str]]] = defaultdict(list)
+    used: dict[str, list[tuple[float, str]]] = defaultdict(list)
     kinds = (EventType.ARTIFACT_USE.value, EventType.LLM_CALL.value, EventType.TOOL_CALL.value,
              EventType.ARTIFACT.value)
     for ev in traj.events:
@@ -112,13 +117,12 @@ def _span_consumption(traj: Trajectory) -> Dict[str, List[Tuple[float, str]]]:
 
 
 def final_lineage(traj: Trajectory) -> Lineage:
-    """Walk back from ``traj.output_artifacts`` over ``derived_from``.  An
-    artifact without it falls back to the artifacts its span consumed before
-    producing it; everything reached that way is marked inferred."""
+    """Walk back from ``traj.output_artifacts`` over ``derived_from``, falling back to what an artifact's
+    span consumed before producing it; artifacts reached that way are marked inferred."""
     arts = traj.artifacts
-    span_used: Optional[Dict[str, List[Tuple[float, str]]]] = None
+    span_used: dict[str, list[tuple[float, str]]] | None = None
 
-    def sources(a: str) -> Tuple[List[str], bool]:
+    def sources(a: str) -> tuple[list[str], bool]:
         nonlocal span_used
         art = arts[a]
         if art.derived_from is not None:
@@ -131,8 +135,8 @@ def final_lineage(traj: Trajectory) -> Lineage:
 
     roots = [a for a in dict.fromkeys(traj.output_artifacts) if a in arts]
 
-    def walk(follow_inferred: bool) -> List[str]:
-        seen: Dict[str, None] = {}
+    def walk(follow_inferred: bool) -> list[str]:
+        seen: dict[str, None] = {}
         stack = list(roots)
         while stack:
             a = stack.pop()
@@ -150,42 +154,26 @@ def final_lineage(traj: Trajectory) -> Lineage:
     return Lineage(every, [a for a in every if a not in recorded])
 
 
-# --------------------------------------------------------------------------- #
-# Observed contribution
-# --------------------------------------------------------------------------- #
 @dataclass
 class ObservedContribution:
-    """Where an agent's outputs were observed to go (provenance, not marginal
-    effect).  ``status`` is the strongest of, in order:
-
-    * ``in_final_lineage`` -- produced an artifact the final output derives from;
-    * ``consumed_downstream`` -- another agent consumed one of its artifacts;
-    * ``delivered_only`` -- its messages/artifacts reached other agents, none
-      of its artifacts was consumed;
-    * ``unused`` -- it had outputs but none reached another agent;
-    * ``unknown`` -- it sent no message and produced no artifact, so there is
-      nothing to trace.
-
-    ``dead`` is True only when nothing it sent was used, provenance coverage
-    is complete and it did not produce the final output; False when some use
-    was observed; ``None`` when that cannot be told."""
     agent_id: str
     status: str
     artifacts_consumed_by_others: int = 0
-    consumers: List[str] = field(default_factory=list)
+    consumers: list[str] = field(default_factory=list)
     messages_used: int = 0
     in_final_lineage: bool = False
     lineage_inferred: bool = False
-    provenance_coverage: Optional[float] = None
-    dead: Optional[bool] = None
+    provenance_coverage: float | None = None
+    dead: bool | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """The record as a JSON-ready dict."""
         return asdict(self)
 
 
-def _artifact_receivers(graph: ExecutionGraph) -> Dict[str, Set[str]]:
+def _artifact_receivers(graph: ExecutionGraph) -> dict[str, set[str]]:
     """artifact id -> agents it was sent to in a message."""
-    receivers: Dict[str, Set[str]] = defaultdict(set)
+    receivers: dict[str, set[str]] = defaultdict(set)
     for m in graph.messages:
         for a in m.artifacts:
             if m.receiver is not None:
@@ -193,22 +181,19 @@ def _artifact_receivers(graph: ExecutionGraph) -> Dict[str, Set[str]]:
     return receivers
 
 
-def _provenance_coverage(traj: Trajectory, graph: ExecutionGraph, agent: str, own: List[str],
-                         receivers: Dict[str, Set[str]]) -> Optional[float]:
-    """Share of the agent's outputs (artifacts, and messages carrying
-    artifacts) whose possible consumers record what they use.  An artifact
-    sent in messages to others can be used by those messages' receivers; one
-    never sent to another agent, by any other agent active after it was
-    produced.  An artifact nobody else could use is no evidence either way."""
+def _provenance_coverage(traj: Trajectory, graph: ExecutionGraph, agent: str, own: list[str],
+                         receivers: dict[str, set[str]]) -> float | None:
+    """Share of the agent's outputs whose possible consumers record what they use (an artifact's message
+    receivers, else other agents active after it); an artifact nobody else could use adds no check."""
     instrumented = graph.coverage.consumers_instrumented
-    checks: List[bool] = []
+    checks: list[bool] = []
     for a in own:
         art = traj.artifacts[a]
         possible = receivers.get(a, set()) - {agent}
         if not possible:
             possible = {s.agent_id for s in traj.spans.values()
                         if s.agent_id != agent and (s.end is None or s.end >= art.produced_at - EPS)}
-        if possible:  # all() over nobody would count as covered
+        if possible:
             checks.append(all(instrumented.get(c, False) for c in possible))
     for m in graph.messages:
         if m.sender == agent and m.artifacts and m.receiver is not None and m.receiver != agent:
@@ -216,11 +201,12 @@ def _provenance_coverage(traj: Trajectory, graph: ExecutionGraph, agent: str, ow
     return sum(checks) / len(checks) if checks else None
 
 
-def compute_contribution(traj: Trajectory, graph: Optional[ExecutionGraph] = None,
-                         lineage: Optional[Lineage] = None) -> Dict[str, ObservedContribution]:
+def compute_contribution(traj: Trajectory, graph: ExecutionGraph | None = None,
+                         lineage: Lineage | None = None) -> dict[str, ObservedContribution]:
+    """Where each agent's outputs were observed to go in one run."""
     graph = graph or build_graph(traj)
     lineage = lineage or final_lineage(traj)
-    produced: Dict[str, List[str]] = defaultdict(list)
+    produced: dict[str, list[str]] = defaultdict(list)
     for a in traj.artifacts.values():
         if a.producer is not None:
             produced[a.producer].append(a.artifact_id)
@@ -229,7 +215,7 @@ def compute_contribution(traj: Trajectory, graph: Optional[ExecutionGraph] = Non
     final_producers = {traj.artifacts[a].producer for a in traj.output_artifacts if a in traj.artifacts}
     receivers = _artifact_receivers(graph)
 
-    out: Dict[str, ObservedContribution] = {}
+    out: dict[str, ObservedContribution] = {}
     for aid in graph.agents:
         own = produced.get(aid, [])
         consumers = sorted({c for a in own for c in graph.artifact_consumers.get(a, []) if c != aid},
@@ -250,7 +236,7 @@ def compute_contribution(traj: Trajectory, graph: Optional[ExecutionGraph] = Non
         else:
             status = "unknown"
         coverage = _provenance_coverage(traj, graph, aid, own, receivers)
-        dead: Optional[bool]
+        dead: bool | None
         if aid in final_producers or consumed or used_msgs:
             dead = False
         elif status in ("unused", "delivered_only") and coverage is not None and coverage >= 1.0:
@@ -262,15 +248,14 @@ def compute_contribution(traj: Trajectory, graph: Optional[ExecutionGraph] = Non
     return out
 
 
-def summarize_contribution(per_run: Sequence[Dict[str, ObservedContribution]]) -> Dict[str, Dict[str, Any]]:
-    """Per agent over runs: how often it was in the final lineage, had an
-    artifact consumed by another agent, and was dead (over the runs where
-    that was known, ``dead_known_runs``), plus its provenance coverage."""
-    by_agent: Dict[str, List[ObservedContribution]] = defaultdict(list)
+def summarize_contribution(per_run: Sequence[dict[str, ObservedContribution]]) -> dict[str, dict[str, Any]]:
+    """Per agent over runs: how often it was in the final lineage, had an artifact consumed downstream,
+    and was dead (over ``dead_known_runs``), plus its provenance coverage."""
+    by_agent: dict[str, list[ObservedContribution]] = defaultdict(list)
     for run in per_run:
         for aid, c in run.items():
             by_agent[aid].append(c)
-    out: Dict[str, Dict[str, Any]] = {}
+    out: dict[str, dict[str, Any]] = {}
     for aid, cs in by_agent.items():
         known = [c.dead for c in cs if c.dead is not None]
         cov = [c.provenance_coverage for c in cs if c.provenance_coverage is not None]

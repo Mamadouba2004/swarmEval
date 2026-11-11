@@ -4,8 +4,17 @@ from datetime import date
 
 import pytest
 
-from swarmeval import (EmbeddingSimilarity, EvaluationResult, LexicalSimilarity, RunContext, SimClock, Task,
-                       Trajectory, compute_redundancy, evaluate)
+from swarmeval import (
+    EmbeddingSimilarity,
+    EvaluationResult,
+    LexicalSimilarity,
+    RunContext,
+    SimClock,
+    Task,
+    Trajectory,
+    compute_redundancy,
+    evaluate,
+)
 from swarmeval.examples.research_swarm import build_benchmark, make_swarm
 from swarmeval.metrics import canonical_args, summarize_redundancy
 
@@ -29,12 +38,12 @@ def search(ctx, span, query, fail=False):
 
 
 def test_canonical_args():
-    assert canonical_args({"q": "a b", "n": 3}) == canonical_args({"n": 3, "q": "a b"})    # key order ignored
+    assert canonical_args({"q": "a b", "n": 3}) == canonical_args({"n": 3, "q": "a b"})
     assert canonical_args({"query": "s1"}) != canonical_args({"query": "s2"})
-    assert canonical_args({"n": 1}) != canonical_args({"n": "1"})          # numbers stay numbers
+    assert canonical_args({"n": 1}) != canonical_args({"n": "1"})
     assert canonical_args({"x": ["A", {"B": "C"}]}) == canonical_args({"x": ["A", {"B": "C"}]})
     obj = object()
-    assert canonical_args({"x": obj}) == json.dumps({"x": repr(obj)})       # unserializable -> repr
+    assert canonical_args({"x": obj}) == json.dumps({"x": repr(obj)})
 
 
 def test_canonical_args_compares_strings_exactly():
@@ -79,20 +88,20 @@ def test_duplicate_classes():
     with ctx.agent("researcher", role="research") as r:
         search(ctx, r, "q1")
         search(ctx, r, "q2", fail=True)
-        search(ctx, r, "q2")              # retry: its own previous q2 call failed
+        search(ctx, r, "q2")
         search(ctx, r, "q3")
-        search(ctx, r, "q3")              # self repeat, not a retry -> accidental
+        search(ctx, r, "q3")
     with ctx.agent("critic", role="critic") as c:
-        search(ctx, c, "q1")              # checking role -> verification
+        search(ctx, c, "q1")
     with ctx.agent("auditor", intent="verification") as au:
-        search(ctx, au, "q3")             # span marked intent=verification
+        search(ctx, au, "q3")
     with ctx.agent("other", role="research") as o:
-        search(ctx, o, "q1")              # plain repeat by another agent -> accidental
+        search(ctx, o, "q1")
     r = compute_redundancy(ctx.finish())
     assert r.tool_calls == 8 and r.duplicate_tool_calls == 5
     assert (r.accidental_duplicates, r.verification_duplicates, r.retry_duplicates) == (2, 2, 1)
     assert r.self_repeats == 1
-    assert r.tool_redundancy == pytest.approx(2 / 8)      # intentional duplicates left out
+    assert r.tool_redundancy == pytest.approx(2 / 8)
     classes = {(d["agent"], d["class"]) for g in r.duplicate_groups for d in g["duplicates"]}
     assert classes == {("researcher", "retry"), ("researcher", "accidental"), ("critic", "verification"),
                        ("auditor", "verification"), ("other", "accidental")}
@@ -125,7 +134,7 @@ def test_long_args_compared_in_full_with_capture_off():
             a.call_tool("lookup", lambda **kw: 1, x=1, y=2)
         with ctx.agent("b") as b:
             search(ctx, b, prefix + "two")
-            b.call_tool("lookup", lambda **kw: 1, y=2, x=1)       # same args, other key order
+            b.call_tool("lookup", lambda **kw: 1, y=2, x=1)
         r = compute_redundancy(traj(ctx.finish()))
         assert r.duplicate_tool_calls == 1 and r.duplicate_groups[0]["tool"] == "lookup"
         assert not r.tool_degraded
@@ -146,18 +155,18 @@ def _artifacts(**ctx_kw):
     ctx = make_ctx(**ctx_kw)
     with ctx.agent("a") as a:
         orig = a.produce("notes", "Aurora was first released in 2015 by Tern", derived_from=[])
-        a.produce("notes2", "Aurora was first released in 2015 by Tern", derived_from=[])   # same producer
+        a.produce("notes2", "Aurora was first released in 2015 by Tern", derived_from=[])
     ctx.clock.advance(1.0)
     with ctx.agent("b") as b:
-        b.produce("dup", "Aurora was first released in 2015 by Tern", derived_from=[])      # redundant
-        b.produce("copy", "Aurora was first released in 2015 by Tern", derived_from=[orig])  # derived copy
+        b.produce("dup", "Aurora was first released in 2015 by Tern", derived_from=[])
+        b.produce("copy", "Aurora was first released in 2015 by Tern", derived_from=[orig])
     with ctx.agent("c") as c:
         c.consume(orig)
-        c.produce("used", "Aurora was first released in 2015 by Tern")                    # consumed copy
+        c.produce("used", "Aurora was first released in 2015 by Tern")
     with ctx.agent("d") as d:
-        d.produce("near", "aurora was first released in 2015 by Tern labs", derived_from=[])  # similar
+        d.produce("near", "aurora was first released in 2015 by Tern labs", derived_from=[])
     with ctx.agent("v", role="verifier") as v:
-        v.produce("check", "Aurora was first released in 2015 by Tern", derived_from=[])    # intentional
+        v.produce("check", "Aurora was first released in 2015 by Tern", derived_from=[])
     with ctx.agent("e") as e:
         e.produce("fresh", "Something else entirely about Helix", derived_from=[])
     return ctx.finish()
@@ -234,23 +243,18 @@ def test_summary_counts_similarity_truncated_runs():
 
 
 def test_golden_demo_redundancy():
-    """researcher_c is given researcher_a's scope (s1, s2), so its two
-    web_search calls repeat a's: 2 accidental duplicates of 6 tool calls.
-    Their notes come from the same sources but each researcher keeps each
-    fact with probability 0.96, so the notes are identical in some runs, close
-    in others (lexical >= 0.6) and further apart when one dropped a fact.
-    Whichever finished first is the original; the other is redundant."""
+    """researcher_c repeats researcher_a's two web_search calls (2 accidental duplicates of 6), and their
+    notes are identical or close in some runs, making the later one redundant."""
     res = evaluate(make_swarm, build_benchmark(2), trials=3, clock_factory=SimClock)
     lex = LexicalSimilarity()
     flagged = 0
-    for traj, cm in zip(res.runs.trajectories, res.per_run_coordination):
+    for traj, cm in zip(res.runs.trajectories, res.per_run_coordination, strict=True):
         r = cm.redundancy
         assert r.tool_calls == 6 and r.accidental_duplicates == 2 and r.tool_redundancy == pytest.approx(2 / 6)
         assert r.verification_duplicates == 0 and r.retry_duplicates == 0 and r.self_repeats == 0
         assert all(g["original_agent"] == "researcher_a" and g["duplicates"][0]["agent"] == "researcher_c"
                    for g in r.duplicate_groups)
         assert r.pairwise_overlap == [{"agents": ["researcher_a", "researcher_c"], "shared": 2, "jaccard": 1.0}]
-        # artifact redundancy: exactly the a/c notes pair, when they are similar enough
         notes = {a.name: str(a.content) for a in traj.artifacts.values()}
         similar = lex.similarity(notes["notes_a"], notes["notes_c"]) >= lex.threshold
         assert r.artifacts == 5 and r.method == "lexical"
@@ -258,7 +262,7 @@ def test_golden_demo_redundancy():
         for p in r.redundant_artifact_pairs:
             assert {p["producer"], p["matches_producer"]} == {"researcher_a", "researcher_c"}
         flagged += r.redundant_artifacts
-    assert flagged == 4        # 4 of these 6 seeded runs (2 identical, 2 near-identical notes)
+    assert flagged == 4
     s = summarize_redundancy([cm.redundancy for cm in res.per_run_coordination])
     assert s.tool_redundancy.mean == pytest.approx(1 / 3) and s.methods == {"lexical": 6}
     assert res.coordination.redundancy.artifact_redundancy.n == 6

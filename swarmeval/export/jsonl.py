@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable, List, Union
+from collections.abc import Iterable
 
 from ..schema import Event, Trajectory
 
 
-def write_events_jsonl(source: Union[Trajectory, Iterable[Trajectory]], path: str) -> int:
+def write_events_jsonl(source: Trajectory | Iterable[Trajectory], path: str) -> int:
+    """Write every event as one JSON line; returns the number written."""
     trajs = [source] if isinstance(source, Trajectory) else list(source)
     n = 0
     with open(path, "w") as f:
@@ -18,8 +19,9 @@ def write_events_jsonl(source: Union[Trajectory, Iterable[Trajectory]], path: st
     return n
 
 
-def read_events_jsonl(path: str) -> List[Event]:
-    out: List[Event] = []
+def read_events_jsonl(path: str) -> list[Event]:
+    """Read events from a JSONL file."""
+    out: list[Event] = []
     with open(path) as f:
         for line in f:
             if line.strip():

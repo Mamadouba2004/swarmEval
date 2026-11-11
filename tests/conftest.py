@@ -1,3 +1,4 @@
+"""Pytest setup: put the repository root on sys.path so tests import the checkout."""
 import os
 import sys
 

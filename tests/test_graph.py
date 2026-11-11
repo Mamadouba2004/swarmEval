@@ -46,9 +46,9 @@ def test_sequential_calls_are_chained():
     ctx = make_ctx()
     clock = ctx.clock
     with ctx.agent("a") as a:
-        c1 = llm(a, clock, 1.0, label="1")
-        c2 = llm(a, clock, 1.0, label="2")
-        c3 = llm(a, clock, 1.0, label="3")
+        llm(a, clock, 1.0, label="1")
+        llm(a, clock, 1.0, label="2")
+        llm(a, clock, 1.0, label="3")
     g = build_graph(ctx.finish())
     ids = [e.event_id for e in g.units if e.kind == "llm"]
     assert len(ids) == 3
@@ -67,7 +67,7 @@ def test_gathered_calls_are_not_chained_and_the_next_call_depends_on_both():
 
     async def main():
         async with ctx.agent("a") as a:
-            await ctx.gather(a.allm(model, 1.0), a.allm(model, 2.0))   # [0,1] and [0,2]: one looks nested
+            await ctx.gather(a.allm(model, 1.0), a.allm(model, 2.0))
             await a.allm(model, 0.5)
 
     asyncio.run(main())
@@ -99,7 +99,7 @@ def test_tool_with_nested_llm_is_not_double_counted():
     assert inner.nested_in == tool_u.node_id and inner.start == 0.5
     assert all(inner.node_id not in (e.src, e.dst) for e in g.edges)
     assert inner not in g.dag_units
-    assert sum(u.weight for u in g.dag_units) == 3.0 + 1.0     # tool (3s, incl. inner) + following call
+    assert sum(u.weight for u in g.dag_units) == 3.0 + 1.0
     assert g.preds(after.node_id) == [tool_u.node_id]
 
 
@@ -127,7 +127,7 @@ def _send_receive(record_receive=True):
         a.send("b", "go")
     clock.advance(1.0)
     with ctx.agent("b") as b:
-        llm(b, clock, 0.5)          # unrelated work before reading the message
+        llm(b, clock, 0.5)
         if record_receive:
             b.receive()
         llm(b, clock, 1.0)
@@ -144,12 +144,12 @@ def test_recorded_receive_gives_a_real_message_edge():
     assert e.dst in g.preds(later.node_id)
     assert g.coverage.message_receive_coverage == 1.0
     (link,) = g.messages
-    assert link.received and link.used and link.used_inferred   # no artifacts: use judged from timing
+    assert link.received and link.used and link.used_inferred
 
 
 def test_without_receive_the_message_edge_is_inferred_to_the_first_unit_after_the_send():
     traj = _send_receive(record_receive=False)
-    del traj.metadata["schema_version"]         # Phase 1 data: receives were never recorded
+    del traj.metadata["schema_version"]
     g = build_graph(traj)
     (e,) = g.edges_of("message")
     first_b = next(u for u in g.units if u.agent_id == "b" and u.kind == "llm")
@@ -175,11 +175,11 @@ def test_message_read_with_inbox_counts_as_delivered():
     ctx = make_ctx()
     clock = ctx.clock
     with ctx.agent("b") as b:
-        llm(b, clock, 1.0)                     # unrelated work before the message
+        llm(b, clock, 1.0)
     with ctx.agent("a") as a:
         a.send("b", "use source X, not Y")
     with ctx.agent("b") as b:
-        assert b.inbox()                       # peek: records no receive
+        assert b.inbox()
         llm(b, clock, 1.0)
     traj = ctx.finish()
     g = build_graph(traj)
@@ -218,7 +218,7 @@ def test_call_that_ended_before_the_send_does_not_use_a_backwards_stamped_messag
     sent = traj.events_of(EventType.MESSAGE)[0].timestamp
     (rcv,) = traj.events_of(EventType.MESSAGE_RECEIVE)
     (call,) = traj.llm_calls()
-    rcv.timestamp, call.timestamp, call.latency_ms = sent - 0.02, sent - 0.015, 5.0   # all over before the send
+    rcv.timestamp, call.timestamp, call.latency_ms = sent - 0.02, sent - 0.015, 5.0
     (link,) = build_graph(traj).messages
     assert link.received and not link.used
 
@@ -231,7 +231,7 @@ def test_forwarding_an_artifact_is_not_consuming_it():
         a.send("hub", "notes", artifacts=[art])
     with ctx.agent("hub") as hub:
         (m,) = hub.receive()
-        llm(hub, clock, 0.5)                      # routing decision, does not read the notes
+        llm(hub, clock, 0.5)
         hub.send("b", m.content, artifacts=m.artifacts)
     with ctx.agent("b") as b:
         b.receive()
@@ -246,7 +246,7 @@ def test_forwarding_an_artifact_is_not_consuming_it():
     assert ("a", "b", "artifact") in kinds and ("a", "hub", "artifact") not in kinds
     a_to_hub = next(m for m in g.messages if m.sender == "a")
     hub_to_b = next(m for m in g.messages if m.sender == "hub")
-    assert a_to_hub.used_inferred                  # hub's call may have read the text, not the notes
+    assert a_to_hub.used_inferred
     assert hub_to_b.used and not hub_to_b.used_inferred
 
 
@@ -263,14 +263,13 @@ def test_invocation_edges_link_parent_frontier_child_and_resume():
     (wk,) = [u for u in g.units if u.agent_id == "worker"]
     inv = {(e.src, e.dst) for e in g.edges_of("invocation")}
     assert inv == {(b1.node_id, wk.node_id), (wk.node_id, b2.node_id)}
-    assert g.preds(b2.node_id) == [wk.node_id]          # not chained to b1 directly: the child sits between
+    assert g.preds(b2.node_id) == [wk.node_id]
     assert any(e.kind == "invocation" and (e.source, e.target) == ("boss", "worker") for e in g.agent_edges)
-    assert g.fan_out("boss") == 0 and g.fan_in("worker") == 0      # invocation is not communication fan
+    assert g.fan_out("boss") == 0 and g.fan_in("worker") == 0
 
 
 def test_wait_on_links_what_was_awaited():
     ctx = make_ctx()
-    clock = ctx.clock
     with ctx.agent("a") as a:
         art = a.produce("notes", "x")
         msg = a.send("b", "x")
@@ -308,9 +307,7 @@ def test_demo_graph_is_acyclic_fully_recorded_and_serialisable():
         assert is_acyclic(g) and g.dropped_edges == 0
         assert g.coverage.message_receive_coverage == 1.0 and g.coverage.derivation_coverage == 1.0
         assert not any(e.inferred for e in g.edges)
-        # researchers consume no artifact: derived_from=[] is no evidence they record use
         instrumented = {a for a, v in g.coverage.consumers_instrumented.items() if v}
         assert instrumented == {"coordinator", "critic", "synthesizer"}
         json.dumps(g.to_dict())
-        # the coordinator relays everything: it talks to every other agent
         assert g.fan_out("coordinator") == 5 and g.fan_in("coordinator") == 4

@@ -12,19 +12,22 @@ rows are ``unknown`` when either side was analysed without coordination.
 
 Differences are measured, not tested: confidence intervals and significance
 are Phase 3.  With few trials, treat small deltas as noise.
+
+METRICS rows are (key, label, higher_is_better, unit); higher_is_better None marks a neutral metric. Runs are
+paired by task and trial; seeds derive from (seed, task, trial), so with the same base seed both sides saw the
+same randomness.
 """
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from .evaluate import EvaluationResult, analyze_runs
 from .pricing import PricingTable
 from .runner import RunSet
 
-# (key, label, higher_is_better, unit); higher_is_better None = neutral (no better direction)
-METRICS: List[Tuple[str, str, Optional[bool], str]] = [
+METRICS: list[tuple[str, str, bool | None, str]] = [
     ("success_rate", "Task Success", True, "pct"),
     ("mean_score", "Mean Score", True, "num"),
     ("run_errors", "Runs Crashed", False, "int"),
@@ -37,7 +40,6 @@ METRICS: List[Tuple[str, str, Optional[bool], str]] = [
     ("wall_clock_s", "Wall Clock / Run", False, "s"),
     ("agent_time_s", "Agent Time / Run", False, "s"),
     ("errors_per_run", "Errors / Run", False, "num"),
-    # coordination (Phase 2)
     ("critical_path_s", "Critical Path / Run", False, "s"),
     ("actual_parallelism", "Actual Parallelism", True, "num"),
     ("potential_parallelism", "Potential Parallelism", None, "num"),
@@ -52,15 +54,16 @@ COORDINATION_KEYS = ("critical_path_s", "actual_parallelism", "potential_paralle
                      "tool_redundancy", "artifact_redundancy", "context_bloat", "dead_agents_per_run",
                      "smells_per_run")
 
-# Relative changes smaller than this are reported as unchanged.
 TOLERANCE = 0.005
 
 
-def _mean(s: Any) -> Optional[float]:
+def _mean(s: Any) -> float | None:
+    """Mean of a summary, or None when it is missing or empty."""
     return s.mean if s is not None and s.n else None
 
 
-def _coordination_values(r: EvaluationResult) -> Dict[str, Optional[float]]:
+def _coordination_values(r: EvaluationResult) -> dict[str, float | None]:
+    """Coordination metric values of a result, all None when coordination was not computed."""
     cs = r.coordination
     if cs is None:
         return {k: None for k in COORDINATION_KEYS}
@@ -78,9 +81,10 @@ def _coordination_values(r: EvaluationResult) -> Dict[str, Optional[float]]:
     }
 
 
-def _values(r: EvaluationResult) -> Dict[str, Optional[float]]:
+def _values(r: EvaluationResult) -> dict[str, float | None]:
+    """Every compared metric's value for one result; partial costs are None, not comparable."""
     eff, perf = r.efficiency, r.performance
-    cost_ok = eff.cost_complete  # a partial cost is not comparable
+    cost_ok = eff.cost_complete
     return {
         "success_rate": perf.success_rate,
         "mean_score": perf.mean_score,
@@ -102,19 +106,21 @@ def _values(r: EvaluationResult) -> Dict[str, Optional[float]]:
 class MetricDelta:
     key: str
     label: str
-    baseline: Optional[float]
-    candidate: Optional[float]
-    higher_is_better: Optional[bool]      # None = neutral: a change is neither better nor worse
+    baseline: float | None
+    candidate: float | None
+    higher_is_better: bool | None
     unit: str
 
     @property
-    def delta(self) -> Optional[float]:
+    def delta(self) -> float | None:
+        """Candidate minus baseline, None when either side is missing."""
         if self.baseline is None or self.candidate is None:
             return None
         return self.candidate - self.baseline
 
     @property
-    def relative(self) -> Optional[float]:
+    def relative(self) -> float | None:
+        """Delta relative to the baseline, None when undefined."""
         d = self.delta
         if d is None or not self.baseline:
             return None
@@ -122,9 +128,8 @@ class MetricDelta:
 
     @property
     def verdict(self) -> str:
-        """``improved`` / ``regressed`` / ``unchanged``, ``changed`` for a
-        neutral metric, or ``unknown`` when a side is missing (e.g. a cost
-        that could not be priced)."""
+        """``improved``, ``regressed``, ``unchanged``, ``changed`` for a neutral metric,
+        or ``unknown`` when a side is missing (e.g. an unpriced cost)."""
         d = self.delta
         if d is None:
             return "unknown"
@@ -135,7 +140,8 @@ class MetricDelta:
             return "changed"
         return "improved" if (d > 0) == self.higher_is_better else "regressed"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """The delta as a JSON-ready dict."""
         return {"key": self.key, "label": self.label, "baseline": self.baseline, "candidate": self.candidate,
                 "delta": self.delta, "relative": self.relative, "verdict": self.verdict,
                 "higher_is_better": self.higher_is_better}
@@ -145,62 +151,72 @@ class MetricDelta:
 class Comparison:
     baseline: EvaluationResult
     candidate: EvaluationResult
-    metrics: List[MetricDelta]
-    per_task: Dict[str, Dict[str, Any]]
-    flips: Dict[str, List[Tuple[str, int]]]          # "gained"/"lost": paired (task, trial) outcome changes
+    metrics: list[MetricDelta]
+    per_task: dict[str, dict[str, Any]]
+    flips: dict[str, list[tuple[str, int]]]
     paired_runs: int
-    per_agent: Dict[str, Dict[str, Any]]
-    shared_tasks: List[str]
-    only_baseline: List[str] = field(default_factory=list)
-    only_candidate: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    per_agent: dict[str, dict[str, Any]]
+    shared_tasks: list[str]
+    only_baseline: list[str] = field(default_factory=list)
+    only_candidate: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def metric(self, key: str) -> MetricDelta:
+        """The MetricDelta for ``key``; KeyError if absent."""
         for m in self.metrics:
             if m.key == key:
                 return m
         raise KeyError(key)
 
     @property
-    def improved(self) -> List[str]:
+    def improved(self) -> list[str]:
+        """Keys of the metrics that improved."""
         return [m.key for m in self.metrics if m.verdict == "improved"]
 
     @property
-    def regressed(self) -> List[str]:
+    def regressed(self) -> list[str]:
+        """Keys of the metrics that regressed."""
         return [m.key for m in self.metrics if m.verdict == "regressed"]
 
     @property
     def is_tradeoff(self) -> bool:
+        """True if some metrics improved and others regressed."""
         return bool(self.improved and self.regressed)
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
+        """Headline counts and verdicts of the comparison."""
         return {"baseline": self.baseline.label, "candidate": self.candidate.label,
                 "benchmark": self.baseline.benchmark, "shared_tasks": len(self.shared_tasks),
                 "paired_runs": self.paired_runs, "improved": self.improved, "regressed": self.regressed,
                 "gained": len(self.flips["gained"]), "lost": len(self.flips["lost"]), "warnings": self.warnings}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """The comparison as a JSON-ready dict."""
         return {"summary": self.summary(), "metrics": [m.to_dict() for m in self.metrics],
                 "per_task": self.per_task, "flips": {k: [list(x) for x in v] for k, v in self.flips.items()},
                 "per_agent": self.per_agent, "only_baseline": self.only_baseline,
                 "only_candidate": self.only_candidate}
 
     def save(self, path: str) -> None:
+        """Write the comparison as JSON."""
         with open(path, "w") as f:
             json.dump(self.to_dict(), f, indent=1, default=str)
 
     def report(self) -> str:
+        """The comparison as a text report."""
         from .report.text import render_comparison
         return render_comparison(self)
 
 
-def _subset(runs: RunSet, task_ids: List[str]) -> RunSet:
+def _subset(runs: RunSet, task_ids: list[str]) -> RunSet:
+    """A copy of ``runs`` keeping only the given tasks."""
     keep = set(task_ids)
     return RunSet(runs.label, runs.benchmark_name, [t for t in runs.trajectories if t.task_id in keep],
                   dict(runs.metadata))
 
 
 def _as_runs(x: Any) -> RunSet:
+    """The RunSet of an EvaluationResult, or the RunSet itself."""
     if isinstance(x, EvaluationResult):
         return x.runs
     if isinstance(x, RunSet):
@@ -208,15 +224,12 @@ def _as_runs(x: Any) -> RunSet:
     raise TypeError(f"expected an EvaluationResult or RunSet, got {type(x).__name__}")
 
 
-def compare(baseline: Any, candidate: Any, pricing: Optional[PricingTable] = None, coordination: bool = True,
+def compare(baseline: Any, candidate: Any, pricing: PricingTable | None = None, coordination: bool = True,
             similarity: Any = None, smell_config: Any = None) -> Comparison:
-    """Compare ``candidate`` against ``baseline`` (each an ``EvaluationResult``
-    or ``RunSet``) on the tasks both contain.  Pass ``pricing`` to price both
-    with the same table; otherwise each keeps the cost recorded at run time.
-    ``coordination``, ``similarity`` and ``smell_config`` are passed to
-    ``analyze_runs`` for both sides."""
+    """Compare ``candidate`` with ``baseline`` (EvaluationResult or RunSet) on shared tasks, priced alike
+    with ``pricing``; ``coordination``, ``similarity`` and ``smell_config`` go to ``analyze_runs`` for both."""
     base_runs, cand_runs = _as_runs(baseline), _as_runs(candidate)
-    warnings: List[str] = []
+    warnings: list[str] = []
     if base_runs.benchmark_name != cand_runs.benchmark_name:
         warnings.append(f"different benchmarks: {base_runs.benchmark_name!r} vs {cand_runs.benchmark_name!r}")
     base_ids, cand_ids = base_runs.task_ids(), cand_runs.task_ids()
@@ -247,7 +260,7 @@ def compare(baseline: Any, candidate: Any, pricing: Optional[PricingTable] = Non
     bv, cv = _values(b), _values(c)
     metrics = [MetricDelta(k, label, bv[k], cv[k], hib, unit) for k, label, hib, unit in METRICS]
 
-    per_task: Dict[str, Dict[str, Any]] = {}
+    per_task: dict[str, dict[str, Any]] = {}
     for tid in shared:
         bt, ct = b.performance.per_task[tid], c.performance.per_task[tid]
         per_task[tid] = {
@@ -258,10 +271,8 @@ def compare(baseline: Any, candidate: Any, pricing: Optional[PricingTable] = Non
             "latency_s": (bt["latency_s"], ct["latency_s"]),
         }
 
-    # Paired runs: same task and trial.  Seeds derive from (seed, task, trial),
-    # so with the same base seed both sides saw the same randomness.
     b_runs = {(t.task_id, t.trial): t for t in b.runs.trajectories}
-    flips: Dict[str, List[Tuple[str, int]]] = {"gained": [], "lost": []}
+    flips: dict[str, list[tuple[str, int]]] = {"gained": [], "lost": []}
     paired = 0
     seeds_differ = False
     for t in c.runs.trajectories:
@@ -277,7 +288,7 @@ def compare(baseline: Any, candidate: Any, pricing: Optional[PricingTable] = Non
     if seeds_differ:
         warnings.append("paired runs used different seeds; per-run flips mix architecture and randomness")
 
-    per_agent: Dict[str, Dict[str, Any]] = {}
+    per_agent: dict[str, dict[str, Any]] = {}
     ba, ca = b.efficiency.per_agent, c.efficiency.per_agent
     for aid in list(ba) + [a for a in ca if a not in ba]:
         x, y = ba.get(aid), ca.get(aid)

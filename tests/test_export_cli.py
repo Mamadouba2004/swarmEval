@@ -1,12 +1,22 @@
+"""Tests for evaluate(), saving and loading run sets, JSONL export and the CLI commands."""
 import json
 import sys
 
 import pytest
 
-from swarmeval.examples.research_swarm import build_benchmark, make_swarm
-from swarmeval import (Benchmark, EvaluationResult, FunctionSwarm, SimClock, Task, evaluate, read_events_jsonl,
-                       render_trajectory, write_events_jsonl)
+from swarmeval import (
+    Benchmark,
+    EvaluationResult,
+    FunctionSwarm,
+    SimClock,
+    Task,
+    evaluate,
+    read_events_jsonl,
+    render_trajectory,
+    write_events_jsonl,
+)
 from swarmeval.cli import main
+from swarmeval.examples.research_swarm import build_benchmark, make_swarm
 from swarmeval.runner import RunSet, derive_seed
 
 
@@ -217,7 +227,7 @@ def test_report_names_an_analysis_failure_without_per_run_errors(tmp_path, monke
     evaluate(make_swarm, build_benchmark(2), trials=1, clock_factory=SimClock).runs.save(str(saved))
     real = cli.analyze_runs
 
-    def broken(runs, *a, coordination=True, **kw):   # fails before any per-run analysis
+    def broken(runs, *a, coordination=True, **kw):
         if coordination:
             raise RuntimeError("analysis bug")
         return real(runs, *a, coordination=False, **kw)

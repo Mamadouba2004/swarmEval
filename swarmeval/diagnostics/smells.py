@@ -16,13 +16,33 @@ from timing rather than recorded (Phase 1 data); their severity is capped.
 Thresholds live in ``SmellConfig``.  The defaults are first guesses, to be
 validated against Phase 3 ablations; override them with a JSON file
 (``load_smell_config``) or ``SmellConfig(...)``.
+
+Ping-pong counts changes of direction in the longest back-and-forth of a
+pair, whatever the message kinds.  The first message of an exchange makes
+its sender the opener; the other side's replies always continue it.  The
+opener turning back continues it only with evidence that it is answering:
+a ``reply_to`` naming a message of the exchange, or a revision of an
+artifact carried in it (same name with a new id, or ``derived_from`` it).
+Turning back to a checker (a reviewer or critic) always continues it.
+Otherwise it starts a new exchange, so a run of delegated tasks, each
+answered once, is a series of round trips.  A plain-text loop with a
+responder that is not a checker, no ``reply_to`` and no artifacts
+therefore does not fire.
+
+Premature synthesis is not flagged for an answer to the receiver's own output: after producing, the receiver
+sent that agent its work or a request, or the late message replies to one of the receiver's later messages.
+
+Classes:
+- Diagnostic: One smell observed in one run (see the module docstring).
+- SmellConfig: Detection thresholds (initial guesses; see the module docstring).
 """
 from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, fields
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any
 
 from ..graph.builder import EPS
 from ..metrics.dependency import REQUEST_KINDS
@@ -38,30 +58,28 @@ SEVERITY_RANK = {s: i for i, s in enumerate(SEVERITIES)}
 SMELLS = ("redundant_delegation", "agent_ping_pong", "over_agentization", "under_specialization",
           "coordinator_bottleneck", "late_information", "premature_synthesis", "context_bloat", "dead_agent",
           "serialized_execution", "communication_overhead")
-# messages that carry information the receiver might need (not just control)
 _CONTENT_KINDS = frozenset({MessageKind.RESULT.value, MessageKind.FEEDBACK.value, MessageKind.INFORMATION.value})
 
 
 @dataclass
 class Diagnostic:
-    """One smell observed in one run (see the module docstring)."""
     smell: str
-    severity: str                   # low | medium | high
+    severity: str
     run_id: str
-    agents: List[str]
+    agents: list[str]
     observation: str
     hypothesis: str
     intervention: str
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
     inferred: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """The diagnostic as a JSON-ready dict."""
         return asdict(self)
 
 
 @dataclass
 class SmellConfig:
-    """Detection thresholds (initial guesses; see the module docstring)."""
     delegation_similarity: float = 0.8
     pingpong_min_alternations: int = 5
     pingpong_high: int = 8
@@ -88,11 +106,13 @@ class SmellConfig:
     comm_high: float = 0.5
     comm_min_messages: int = 3
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """The thresholds as a dict."""
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "SmellConfig":
+    def from_dict(cls, d: dict[str, Any]) -> SmellConfig:
+        """Thresholds from a dict, rejecting unknown keys."""
         known = {f.name for f in fields(cls)}
         unknown = sorted(k for k in d if k not in known)
         if unknown:
@@ -123,58 +143,60 @@ def resolve_smell_config(spec: Any) -> SmellConfig:
     raise TypeError(f"expected SmellConfig, dict or path, got {type(spec).__name__}")
 
 
-# --------------------------------------------------------------------------- #
-# helpers
-# --------------------------------------------------------------------------- #
 def _pct(x: float) -> str:
+    """A fraction as a whole percentage."""
     return f"{x * 100:.0f}%"
 
 
 def _names(agents: Iterable[str]) -> str:
+    """Agent names joined as 'a, b and c'."""
     a = list(agents)
     return a[0] if len(a) == 1 else ", ".join(a[:-1]) + " and " + a[-1]
 
 
 def _cap(severity: str, cap: str) -> str:
+    """``severity``, lowered to ``cap`` if it is more severe."""
     return severity if SEVERITY_RANK[severity] <= SEVERITY_RANK[cap] else cap
 
 
-def _roles(traj: Trajectory) -> Dict[str, Optional[str]]:
-    roles: Dict[str, Optional[str]] = {}
+def _roles(traj: Trajectory) -> dict[str, str | None]:
+    """Each agent's first recorded role."""
+    roles: dict[str, str | None] = {}
     for s in sorted(traj.spans.values(), key=lambda s: s.start):
         roles[s.agent_id] = roles.get(s.agent_id) or s.role
     return roles
 
 
-def _is_checker(traj: Trajectory, agent: str, roles: Dict[str, Optional[str]]) -> bool:
+def _is_checker(traj: Trajectory, agent: str, roles: dict[str, str | None]) -> bool:
+    """True if the agent verifies others' work, by role or by what it does."""
     return (roles.get(agent) or "").lower() in VERIFICATION_ROLES or is_verification(traj, agent, None)
 
 
 class _Ctx:
-    def __init__(self, traj: Trajectory, cm: "CoordinationMetrics", cfg: SmellConfig) -> None:
+    def __init__(self, traj: Trajectory, cm: CoordinationMetrics, cfg: SmellConfig) -> None:
         self.traj, self.cm, self.cfg = traj, cm, cfg
         self.graph = cm.graph
         self.agents = list(self.graph.agents) if self.graph is not None else traj.agent_ids()
         self.rank = {a: i for i, a in enumerate(self.agents)}
         self.roles = _roles(traj)
-        self.out: List[Diagnostic] = []
+        self.out: list[Diagnostic] = []
         cov = cm.coverage.message_receive_coverage
-        self.receive_cov = cov            # None = no messages at all
+        self.receive_cov = cov
         self.recorded = cov is None or cov >= 1.0
 
-    def order(self, agents: Iterable[str]) -> List[str]:
+    def order(self, agents: Iterable[str]) -> list[str]:
+        """Agents in first-start order, then by id, without duplicates."""
         return sorted(set(agents), key=lambda a: (self.rank.get(a, len(self.rank)), a))
 
     def add(self, smell: str, severity: str, agents: Iterable[str], observation: str, hypothesis: str,
-            intervention: str, evidence: Dict[str, Any], inferred: bool = False) -> None:
+            intervention: str, evidence: dict[str, Any], inferred: bool = False) -> None:
+        """Append a diagnostic for this run."""
         self.out.append(Diagnostic(smell, severity, self.traj.run_id, self.order(agents), observation, hypothesis,
                                    intervention, evidence, inferred))
 
 
-# --------------------------------------------------------------------------- #
-# detectors
-# --------------------------------------------------------------------------- #
 def _redundant_delegation(c: _Ctx) -> None:
+    """Flag similar requests reaching one agent from several senders, or delegated work repeated."""
     traj, cfg = c.traj, c.cfg
     seq = {ev.event_id: i for i, ev in enumerate(traj.events)}
     asks = sorted((m for m in traj.messages() if m.kind in REQUEST_KINDS and m.sender and m.receiver
@@ -186,12 +208,11 @@ def _redundant_delegation(c: _Ctx) -> None:
             return 1.0
         return sim.scores([to_text(a.content), to_text(b.content)], [(0, 1)])[0]
 
-    # (a) similar requests reaching one receiver from two or more senders
-    by_receiver: Dict[str, List[Any]] = defaultdict(list)
+    by_receiver: dict[str, list[Any]] = defaultdict(list)
     for m in asks:
         by_receiver[m.receiver].append(m)
     for receiver, ms in by_receiver.items():
-        senders: Set[str] = set()
+        senders: set[str] = set()
         best = 0.0
         for i, a in enumerate(ms):
             for b in ms[i + 1:]:
@@ -209,21 +230,20 @@ def _redundant_delegation(c: _Ctx) -> None:
                   f"Re-run with a single agent issuing this request to {receiver} and compare success and cost.",
                   {"receiver": receiver, "senders": names, "similarity": best})
 
-    # (b) one sender delegating to several workers who then repeat each other's tool calls
-    calls_after: Dict[str, List[Any]] = defaultdict(list)
+    calls_after: dict[str, list[Any]] = defaultdict(list)
     for ev in traj.tool_calls():
         if ev.agent_id:
             calls_after[ev.agent_id].append(ev)
-    by_sender: Dict[str, Dict[str, Any]] = defaultdict(dict)
+    by_sender: dict[str, dict[str, Any]] = defaultdict(dict)
     for m in asks:
         if not _is_checker(traj, m.receiver, c.roles):
-            by_sender[m.sender].setdefault(m.receiver, m)   # first delegation to each receiver
+            by_sender[m.sender].setdefault(m.receiver, m)
     for sender, first in by_sender.items():
         recv = c.order(first)
         keys = {r: {tool_key(ev) for ev in calls_after.get(r, []) if ev.timestamp >= first[r].timestamp - EPS
                     and not is_verification(traj, r, ev.span_id, ev.metadata)} for r in recv}
-        involved: Set[str] = set()
-        shared_keys: Set[Tuple[str, str]] = set()
+        involved: set[str] = set()
+        shared_keys: set[tuple[str, str]] = set()
         best_sim = 0.0
         for i, a in enumerate(recv):
             for b in recv[i + 1:]:
@@ -250,26 +270,17 @@ def _redundant_delegation(c: _Ctx) -> None:
 
 
 def _ping_pong(c: _Ctx) -> None:
-    """Counts changes of direction in the longest back-and-forth of a pair,
-    whatever the message kinds.  The first message of an exchange makes its
-    sender the opener; the other side's replies always continue it.  The
-    opener turning back continues it only with evidence that it is answering:
-    a ``reply_to`` naming a message of the exchange, or a revision of an
-    artifact carried in it (same name with a new id, or ``derived_from`` it).
-    Turning back to a checker (a reviewer or critic) always continues it.
-    Otherwise it starts a new exchange, so a run of delegated tasks, each
-    answered once, is a series of round trips.  A plain-text loop with a
-    responder that is not a checker, no ``reply_to`` and no artifacts
-    therefore does not fire."""
+    """Flag pairs whose longest back-and-forth exchange changes direction often enough;
+    how an exchange starts, continues and restarts is described in the module overview."""
     cfg, arts = c.cfg, c.traj.artifacts
-    pairs: Dict[Tuple[str, str], List[str]] = defaultdict(list)
-    longest: Dict[Tuple[str, str], int] = defaultdict(int)
-    ex: Dict[Tuple[str, str], Dict[str, Any]] = {}      # pair -> the current exchange
+    pairs: dict[tuple[str, str], list[str]] = defaultdict(list)
+    longest: dict[tuple[str, str], int] = defaultdict(int)
+    ex: dict[tuple[str, str], dict[str, Any]] = {}
 
-    def revises(aid: str, carried: Set[str]) -> bool:
+    def revises(aid: str, carried: set[str]) -> bool:
         a = arts.get(aid)
         if a is None or aid in carried:
-            return False                                 # the identical artifact again is no evidence
+            return False
         return (any(arts[x].name == a.name for x in carried if x in arts)
                 or any(x in carried for x in a.derived_from or []))
 
@@ -307,8 +318,9 @@ def _ping_pong(c: _Ctx) -> None:
 
 
 def _over_agentization(c: _Ctx) -> None:
+    """Flag many low-contribution agents, or too many agents for a simple task."""
     cfg, cm = c.cfg, c.cm
-    agents = [a for a in c.agents if a in c.roles]     # agents that actually ran
+    agents = [a for a in c.agents if a in c.roles]
     n = len(agents)
     if n == 0:
         return
@@ -331,7 +343,7 @@ def _over_agentization(c: _Ctx) -> None:
         sev = "high"
     text = "; ".join(facts)
     c.add("over_agentization", _cap(sev, "low") if inferred else sev, low or agents,
-          text[:1].upper() + text[1:] + ".",          # not capitalize(): it lowercases agent ids
+          text[:1].upper() + text[1:] + ".",
           "The swarm may be using more agents than the task needs; extra agents are not bad in themselves "
           "if they add enough value for their cost.",
           f"Re-run with {_names(low) if low else 'fewer agents'} removed and compare success and cost.",
@@ -340,11 +352,12 @@ def _over_agentization(c: _Ctx) -> None:
 
 
 def _under_specialization(c: _Ctx) -> None:
+    """Flag agent pairs with overlapping tools and similar outputs."""
     red = c.cm.redundancy
     if red is None:
         return
     overlap = {tuple(p["agents"]): p for p in red.pairwise_overlap}
-    similar: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+    similar: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for p in red.redundant_artifact_pairs:
         if p.get("class") == "accidental" and p.get("producer") and p.get("matches_producer"):
             similar[tuple(sorted((p["producer"], p["matches_producer"])))].append(p)   # type: ignore[index]
@@ -377,11 +390,12 @@ def _under_specialization(c: _Ctx) -> None:
 
 
 def _bottleneck(c: _Ctx) -> None:
+    """Flag a hub agent that most messages pass through, worse when it relays or sits on the critical path."""
     cfg, comm, dep = c.cfg, c.cm.communication, c.cm.dependency
     if comm is None or comm.hub_agent is None or comm.hub_share is None or comm.hub_share < cfg.hub_share:
         return
     hub = comm.hub_agent
-    peers: Set[str] = set()
+    peers: set[str] = set()
     for m in c.traj.messages():
         if hub in (m.sender, m.receiver):
             peers.update(x for x in (m.sender, m.receiver) if x and x != hub)
@@ -413,21 +427,21 @@ def _bottleneck(c: _Ctx) -> None:
 
 
 def _late_and_premature(c: _Ctx) -> None:
+    """Flag agents that act before their inputs exist or receive inputs after their last call."""
     g = c.graph
     if g is None:
         return
-    by_agent: Dict[str, List[Any]] = defaultdict(list)
+    by_agent: dict[str, list[Any]] = defaultdict(list)
     for u in g.dag_units:
         if u.agent_id:
             by_agent[u.agent_id].append(u)
-    produced: Dict[str, List[float]] = defaultdict(list)
+    produced: dict[str, list[float]] = defaultdict(list)
     for a in c.traj.artifacts.values():
         if a.producer:
             produced[a.producer].append(a.produced_at)
     finals = {c.traj.artifacts[a].producer for a in c.traj.output_artifacts if a in c.traj.artifacts}
     phase1 = g.schema_version is None
-    # (sender, receiver) -> when the sender asked for something or passed on something it produced
-    shared: Dict[Tuple[str, str], List[float]] = defaultdict(list)
+    shared: dict[tuple[str, str], list[float]] = defaultdict(list)
     by_id = {ev.message_id: ev for ev in c.traj.messages() if ev.message_id}
     for ev in c.traj.messages():
         if ev.kind in REQUEST_KINDS or any(
@@ -440,9 +454,9 @@ def _late_and_premature(c: _Ctx) -> None:
         sent_at = g.unit(m.send_node).start
         if m.receive_node is None:
             if not any(u.start < sent_at - EPS for u in by_agent.get(r, [])):
-                continue   # the receiver never ran before either: not a timing problem
+                continue
             if any(u.start >= sent_at - EPS for u in by_agent.get(r, [])):
-                continue   # r started work after the send (it may have peeked at its inbox)
+                continue
             c.add("late_information", "low" if phase1 else "medium", [m.sender or "-", r],
                   f"A {m.kind} message from {m.sender} ({m.tokens} tokens) was sent to {r} at "
                   f"t={sent_at - (c.traj.started_at or 0.0):.1f}s, after {r}'s last recorded work.",
@@ -459,7 +473,7 @@ def _late_and_premature(c: _Ctx) -> None:
         q = by_id.get(getattr(by_id.get(m.message_id), "reply_to", None))
         if (q is not None and q.sender == r and q.timestamp >= min(before) - EPS) or any(
                 min(before) - EPS <= t <= sent_at for t in shared.get((r, m.sender), [])):
-            continue   # an answer to r's own output: r sent the sender its work, or m replies to r after it produced
+            continue
         sev = "high" if r in finals else "medium"
         inferred = not m.received
         c.add("premature_synthesis", _cap(sev, "low") if inferred else sev, [r, m.sender or "-"],
@@ -472,14 +486,14 @@ def _late_and_premature(c: _Ctx) -> None:
 
 
 def _context_bloat(c: _Ctx) -> None:
+    """Flag agents whose LLM calls receive far more tokens than are relevant."""
     ctx, cfg = c.cm.context, c.cfg
     if ctx is None:
         return
-    flagged: Dict[str, List[Any]] = defaultdict(list)
+    flagged: dict[str, list[Any]] = defaultdict(list)
     for call in ctx.calls:
         if call.ratio >= cfg.bloat_ratio and call.excess >= cfg.bloat_min_excess:
             flagged[call.agent_id or "-"].append(call)
-    # worst first, so a cross-run summary quotes the most bloated agent
     for agent in sorted(c.order(flagged), key=lambda a: -max(x.ratio for x in flagged[a])):
         calls = flagged[agent]
         worst = max(calls, key=lambda x: (x.ratio, x.excess))
@@ -487,7 +501,7 @@ def _context_bloat(c: _Ctx) -> None:
         bases = {x.basis for x in calls}
         inferred = bool(bases & {"task_only", "inferred"})
         if "task_only" in bases:
-            sev = _cap(sev, "low")      # nothing recorded beyond the task: the inputs may just be untracked
+            sev = _cap(sev, "low")
         elif inferred:
             sev = _cap(sev, "medium")
         c.add("context_bloat", sev, [agent],
@@ -503,6 +517,7 @@ def _context_bloat(c: _Ctx) -> None:
 
 
 def _dead_agents(c: _Ctx) -> None:
+    """Flag agents whose outputs were never used, when provenance is complete enough to tell."""
     for a in c.agents:
         oc = c.cm.contribution.get(a)
         if oc is None or oc.dead is not True:
@@ -526,10 +541,10 @@ def _dead_agents(c: _Ctx) -> None:
 
 
 def _serialized(c: _Ctx) -> None:
+    """Flag runs whose busy wall time far exceeds the critical path."""
     dep, cfg = c.cm.dependency, c.cfg
     if dep is None or dep.critical_path_s <= EPS or dep.wall_s <= EPS:
         return
-    # time in which nothing was recorded is idle, not serialized work
     busy_wall = dep.wall_s - (dep.unrecorded_s or 0.0)
     ratio = busy_wall / dep.critical_path_s
     gap = busy_wall - dep.critical_path_s
@@ -553,6 +568,7 @@ def _serialized(c: _Ctx) -> None:
 
 
 def _comm_overhead(c: _Ctx) -> None:
+    """Flag runs whose message bodies are large relative to LLM tokens."""
     comm, cfg = c.cm.communication, c.cfg
     if comm is None or comm.comm_work_ratio is None or comm.messages < cfg.comm_min_messages:
         return
@@ -577,8 +593,8 @@ _DETECTORS = (_redundant_delegation, _ping_pong, _over_agentization, _under_spec
               _late_and_premature, _context_bloat, _dead_agents, _serialized, _comm_overhead)
 
 
-def detect_smells(traj: Trajectory, metrics: "CoordinationMetrics",
-                  config: Optional[SmellConfig] = None) -> List[Diagnostic]:
+def detect_smells(traj: Trajectory, metrics: CoordinationMetrics,
+                  config: SmellConfig | None = None) -> list[Diagnostic]:
     """All smells found in one run, in ``SMELLS`` order then by severity."""
     c = _Ctx(traj, metrics, resolve_smell_config(config))
     for detect in _DETECTORS:
