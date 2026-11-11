@@ -2,10 +2,12 @@
 
 The golden tests compare outputs with files under tests/fixtures/golden/. After an intended output change,
 regenerate them with ``SWARMEVAL_UPDATE_GOLDEN=1 .venv/bin/pytest tests/test_export_cli.py`` (this
-also replaces the demo_runs.json input), then review the diff before committing.
+also replaces the demo_runs.json input and the live_events.txt / live_report.txt outputs of a fresh demo run),
+then review the diff before committing.
 """
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -62,6 +64,17 @@ def test_golden_outputs_unchanged():
 def test_golden_compare_unchanged():
     result = analyze_runs(load_runset(str(GOLDEN / "demo_runs.json")))
     _check_golden("compare.txt", render_comparison(compare(result, result)))
+
+
+_ID = re.compile(r"\b(run|ev|span|msg|art)_[0-9a-f]{12}\b")
+
+
+def test_demo_live_events_and_report_unchanged():
+    result = evaluate(make_swarm, build_benchmark(), clock_factory=SimClock)
+    events = sorted(_ID.sub(r"\1_ID", json.dumps(e.to_dict(), sort_keys=True))
+                    for t in result.runs for e in t.events)
+    _check_golden("live_events.txt", "\n".join(events) + "\n")
+    _check_golden("live_report.txt", _ID.sub(r"\1_ID", result.report()))
 
 
 def test_evaluate_runs_benchmark_and_is_reproducible():
