@@ -211,7 +211,6 @@ def render_coordination(result: Any) -> str:
             cov_s = c.get("provenance_coverage")
             dead = c.get("dead_rate")
             share = util.get(aid, {}).get("token_share")
-            # built outside the f-string: reusing its quote inside needs Python 3.12+
             dead_s = "unknown" if dead is None else f"{dead * 100:.0f}%"
             cov_txt = "unknown" if cov_s is None else f"{cov_s['mean'] * 100:.0f}%"
             parts.append(f"  {aid:<{aw}}{c['lineage_rate'] * 100:>8.0f}%{c['consumed_rate'] * 100:>9.0f}%"
