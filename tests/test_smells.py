@@ -629,6 +629,24 @@ def test_smell_config_rejects_unknown_or_mistyped_sections(demo):
     assert "context_bloat" not in {d.smell for d in out}
 
 
+def test_register_smell_rejects_config_cls_without_defaults(demo, smell_registry):
+    from dataclasses import dataclass
+
+    from swarmeval import register_smell
+
+    @dataclass
+    class NeedsArg:
+        limit: float
+
+    S = smell_registry
+    before = (dict(S._REGISTRY), list(SMELLS), dict(S._CONFIG_CLASSES))
+    with pytest.raises(TypeError, match="NeedsArg"):
+        register_smell("x", lambda c, section: None, config_cls=NeedsArg)
+    assert (dict(S._REGISTRY), list(SMELLS), dict(S._CONFIG_CLASSES)) == before
+    traj, cm = demo.runs.trajectories[0], demo.per_run_coordination[0]
+    assert [d.to_dict() for d in detect_smells(traj, cm, SmellConfig())] == [d.to_dict() for d in cm.diagnostics]
+
+
 def test_late_and_premature_registers_two_smells(smell_registry):
     S = smell_registry
     assert list(S._REGISTRY) == ["redundant_delegation", "agent_ping_pong", "over_agentization",

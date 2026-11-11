@@ -665,6 +665,12 @@ def register_smell(name: str, detector: Callable[[SmellContext, Any], None], sme
                    config_cls: type | None = None) -> None:
     """Run ``detector(ctx, section)`` in ``detect_smells`` under ``name`` (replacing one registered there), with its
     ``config_cls`` thresholds as section ``name`` of ``SmellConfig``; append its smells to ``SMELLS``."""
+    if config_cls is not None:
+        try:
+            config_cls()
+        except Exception as e:
+            raise TypeError(f"config_cls {config_cls.__name__} for smell {name!r} must construct with no "
+                            f"arguments (give every field a default): {e}") from e
     _REGISTRY[name] = detector
     _CONFIG_CLASSES.pop(name, None)
     if config_cls is not None:
