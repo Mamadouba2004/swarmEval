@@ -34,7 +34,8 @@ sent that agent its work or a request, or the late message replies to one of the
 
 Custom smells: ``register_smell(name, detector, smells=None)`` adds ``detector(ctx)`` to the detectors run by
 ``detect_smells``, after those already registered, and appends the smells it emits (default ``(name,)``) to
-``SMELLS``; registering a name again replaces its detector.  The detector receives a ``SmellContext`` with
+``SMELLS``; registering a name again replaces its detector and its smells, and a smell already emitted under
+another name is a ValueError.  The detector receives a ``SmellContext`` with
 ``traj`` (the Trajectory), ``cm`` (its CoordinationMetrics), ``cfg`` (the SmellConfig), ``graph`` (the execution
 graph or None), ``agents`` (agent ids in first-start order), ``roles`` (agent id to role), ``receive_cov`` and
 ``recorded`` (whether message receipts were fully recorded), ``order(agents)`` and
@@ -598,13 +599,21 @@ def _comm_overhead(c: SmellContext) -> None:
 
 
 _REGISTRY: dict[str, Callable[[SmellContext], None]] = {}
+_EMITS: dict[str, tuple[str, ...]] = {}
 
 
 def register_smell(name: str, detector: Callable[[SmellContext], None], smells: tuple[str, ...] | None = None) -> None:
-    """Run ``detector`` in ``detect_smells`` under ``name`` (replacing one already registered there), and append the
-    smells it emits (default ``(name,)``) to ``SMELLS``."""
+    """Run ``detector`` under ``name`` (replacing its detector and smells), keeping ``SMELLS`` to the emitted smells;
+    a smell another registration emits is a ValueError."""
+    emits = tuple(dict.fromkeys(smells or (name,)))
+    for s in emits:
+        owner = next((n for n, e in _EMITS.items() if n != name and s in e), None)
+        if owner is not None:
+            raise ValueError(f"smell {s!r} is already emitted by the detector registered as {owner!r}")
     _REGISTRY[name] = detector
-    SMELLS.extend(s for s in dict.fromkeys(smells or (name,)) if s not in SMELLS)
+    _EMITS[name] = emits
+    live = {s for e in _EMITS.values() for s in e}
+    SMELLS[:] = [s for s in SMELLS if s in live] + [s for s in emits if s not in SMELLS]
 
 
 register_smell("redundant_delegation", _redundant_delegation)
