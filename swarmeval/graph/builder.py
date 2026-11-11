@@ -41,6 +41,7 @@ _UNIT_KINDS = {
     EventType.WAIT.value: "wait",
 }
 _CALL_KINDS = ("llm", "tool")
+_COMM_KINDS = ("message", "artifact")
 
 
 # --------------------------------------------------------------------------- #
@@ -211,11 +212,15 @@ class ExecutionGraph:
         return [e for e in self.edges if e.type in types]
 
     def fan_in(self, agent_id: str) -> int:
-        """Distinct other agents with an edge (any kind) into ``agent_id``."""
-        return len({e.source for e in self.agent_edges if e.target == agent_id and e.source != agent_id})
+        """Distinct other agents with a message or artifact edge into ``agent_id``.
+        Invocation edges are control flow, not communication."""
+        return len({e.source for e in self.agent_edges if e.kind in _COMM_KINDS
+                    and e.target == agent_id and e.source != agent_id})
 
     def fan_out(self, agent_id: str) -> int:
-        return len({e.target for e in self.agent_edges if e.source == agent_id and e.target != agent_id})
+        """Distinct other agents ``agent_id`` reaches by message or artifact edges."""
+        return len({e.target for e in self.agent_edges if e.kind in _COMM_KINDS
+                    and e.source == agent_id and e.target != agent_id})
 
     def to_dict(self) -> Dict[str, Any]:
         return {

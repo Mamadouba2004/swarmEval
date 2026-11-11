@@ -61,8 +61,8 @@ The core analytical layer: did multiple agents actually produce useful coordinat
 
 * **Agent utilization** — actions, tokens, tools, artifacts, messages, downstream references. Utilization is *not* contribution.
 * **Agent contribution** — *observed* (provenance: artifacts consumed downstream, messages used, lineage of the final output) vs *marginal* (ablation). SwarmEval never says "Agent X contributed 12%"; it says "removing Agent X reduced task success by 12 points under this configuration".
-* **Redundant work** — duplicate tool calls, similar artifacts, shared sources; *accidental* redundancy distinguished from *intentional verification* (critic/verifier roles, `intent="verification"`).
-* **Communication overhead** — message counts and tokens, category split (useful work / information transfer / coordination), repeated and broadcast messages, hub share. Communication is not automatically waste.
+* **Redundant work** (`metrics/redundancy.py`) — duplicate tool calls, similar artifacts, shared sources; *accidental* redundancy distinguished from *intentional verification* (critic/verifier roles, `intent="verification"`) and retries. Tool redundancy = accidental duplicate calls (same tool, same args; strings exact, key order ignored) ÷ tool calls; artifact redundancy (a separate number) = artifacts matching an earlier other-producer artifact by hash or similarity ÷ artifacts. Similarity is pluggable (`swarmeval/similarity.py`): lexical shingle Jaccard by default (stdlib), embeddings via the optional `swarmeval[embeddings]` extra or a user `embed_fn`.
+* **Communication overhead** (`metrics/communication.py`) — message counts and body tokens (attached artifacts excluded: counted once, at production), category split (work product / information / coordination), repeated and broadcast messages, fan-in/out, relay fraction, hub share, used-message ratio. **Communication / Work** = message body tokens as a share of LLM tokens (Σ body ÷ Σ prompt + output). Communication is not automatically waste.
 * **Dependency efficiency** — necessary vs unused edges, depth, fan-in/out, cycles, serial bottlenecks, isolated agents.
 * **Parallelism** — theoretical (dependency-allowed) vs actual overlap; the gap is an optimization opportunity, subject to rate limits and deliberate synchronisation.
 * **Context bloat** — tokens received vs tokens relevant (task + referenced artifacts).
@@ -129,7 +129,7 @@ Task = input, expected behaviour, success criteria, constraints, evaluator spec,
 | Phase | Deliverable | Status |
 |---|---|---|
 | 1 Observability & evaluation | reproducible trace + evaluation report | **done** (`schema`, `recorder`, `runner`, `evaluators`, `metrics/performance`, `metrics/efficiency`, `report/text`, `export/jsonl`, `export/parquet`, `compare` (run-to-run comparison, research.md §27), `integrations/anthropic`, CLI incl. `export` and `compare`); sync and async swarms |
-| 2 Coordination analysis | explain where the swarm is inefficient and why | in progress: provenance schema v2, `graph/builder`, `metrics/contribution` (utilization, observed contribution), `metrics/coordination` done; communication, redundancy, dependencies, smells and reports planned (`diagnostics/`) |
+| 2 Coordination analysis | explain where the swarm is inefficient and why | in progress: provenance schema v2, `graph/builder`, `metrics/contribution` (utilization, observed contribution), `metrics/coordination`, `metrics/communication`, `metrics/redundancy`, `similarity` done; dependencies, smells and reports planned (`diagnostics/`) |
 | 3 Causal & research features | estimate which components actually matter | planned (`causal/`, confidence intervals in `stats`, `validity`) |
 | 4 Optimization | experimentally validated architecture improvements | planned (`optimize/`) |
 

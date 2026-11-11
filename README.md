@@ -22,6 +22,7 @@ Python 3.12+, no runtime dependencies. Optional Anthropic SDK adapter. The desig
 ```bash
 pip install -e ".[dev]"        # from this repo
 pip install -e ".[anthropic]"  # optional: Anthropic SDK adapter
+pip install -e ".[embeddings]" # optional: embedding similarity for artifact redundancy
 ```
 
 ## 60-second demo
@@ -140,7 +141,11 @@ Built-in evaluators: `exact_match`, `contains_all` / `contains_any` (with `forbi
 |---|---|
 | **Performance** | success rate, mean score, constraint pass rate, per-task and per-trial breakdown, crashed runs |
 | **Efficiency** | input/output tokens, LLM and tool call counts, messages, cost (pricing table), cost per successful task, wall clock, aggregate agent time, waiting time, per-agent tokens/cost/calls/time |
-| **Coordination** (Phase 2, in progress) | execution graph (`build_graph`: agent graph + work-unit DAG), provenance coverage, per-agent utilization shares, observed contribution (final-output lineage, artifacts consumed by others, `dead` only when provenance coverage is complete) -- `result.per_run_coordination`, `result.coordination` |
+| **Coordination** (Phase 2, in progress) | execution graph (`build_graph`: agent graph + work-unit DAG), provenance coverage, per-agent utilization shares, observed contribution (final-output lineage, artifacts consumed by others, `dead` only when provenance coverage is complete), communication overhead, redundant work -- `result.per_run_coordination`, `result.coordination` |
+
+**Communication / Work** = message body tokens as a share of LLM tokens: Σ message body tokens ÷ Σ (prompt + output tokens of LLM calls). A message's body excludes the artifacts it carries (their tokens count once, when produced). Messages are also split by kind (coordination = task_assignment/coordination/request, information, work product = result/feedback), with repeated messages, broadcasts, fan-in/out, relay fraction, **hub share** (largest share of messages one agent was party to; 1.0 for a star) and the share of messages the receiver used. Communication is not automatically waste.
+
+**Redundancy** is two separate numbers. *Tool redundancy* = accidental duplicate tool calls ÷ tool calls, where a duplicate has the same tool and arguments as an earlier call (strings compared exactly, key order ignored) (compared by a hash of the full arguments taken at record time, so `capture_text=False` previews do not merge distinct calls); retries (after the agent's own failed call) and verification (critic/verifier/reviewer/validator/judge roles or `intent="verification"`) are counted separately and left out of the ratio. *Artifact redundancy* = artifacts matching an earlier artifact of another producer (same hash or text similarity) ÷ artifacts, excluding copies of the producer's own inputs. Similarity is lexical (word 3-shingle Jaccard ≥ 0.6, no dependencies) by default; `analyze_runs(runs, similarity="embeddings")` uses sentence embeddings (cosine ≥ 0.85, needs `swarmeval[embeddings]` or `EmbeddingSimilarity(embed_fn=...)`), and any object with `threshold`, `candidates()` and `scores()` can be passed (or `"pkg.module:attr"`). Without captured text (`capture_text=False`) only exact hashes are compared and the result is marked `degraded`.
 
 Repeated trials use seeds derived from `(seed, task, trial)` so a run set is reproducible. Means and spreads are reported; confidence intervals are Phase 3.
 

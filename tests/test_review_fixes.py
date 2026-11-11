@@ -356,7 +356,7 @@ def test_exception_through_nested_tool_calls_counts_once():
     assert (inner_ev.tool_name, outer_ev.tool_name) == ("inner", "outer")
     assert inner_ev.status == outer_ev.status == "error"
     assert "propagated" not in inner_ev.metadata
-    assert outer_ev.metadata == {"propagated": True, "origin_event_id": inner_ev.event_id}
+    assert outer_ev.metadata.items() >= {"propagated": True, "origin_event_id": inner_ev.event_id}.items()
 
 
 def test_exception_through_llm_call_wrapping_a_tool_call_counts_once():

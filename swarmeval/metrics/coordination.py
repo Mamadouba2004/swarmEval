@@ -1,10 +1,11 @@
 """Layer 3 -- coordination quality of one run, and its summary over runs (Phase 2).
 
 ``compute_coordination`` is the single entry point: it builds the execution
-graph once and hands it to each analysis.  PR A fills in provenance coverage,
-utilization and observed contribution; communication, redundancy, dependency
-(critical path, parallelism) and context analyses are added as sibling
-modules and attach to the same ``CoordinationMetrics`` (``None`` until then).
+graph once and hands it to each analysis.  It fills in provenance coverage,
+utilization, observed contribution, communication overhead and redundancy;
+dependency (critical path, parallelism) and context analyses are added as
+sibling modules and attach to the same ``CoordinationMetrics`` (``None``
+until then).
 """
 from __future__ import annotations
 
@@ -17,7 +18,11 @@ from ..schema import Trajectory
 from ..stats import Summary, mean, summarize
 from .contribution import (AgentUtilization, Lineage, ObservedContribution, compute_contribution,
                            compute_utilization, final_lineage, summarize_contribution)
+from .communication import (CommunicationMetrics, CommunicationSummary, compute_communication,
+                            summarize_communication)
 from .efficiency import EfficiencyMetrics
+from .redundancy import RedundancyMetrics, RedundancySummary, compute_redundancy, summarize_redundancy
+from ..similarity import resolve_similarity
 
 
 def _dict(x: Any) -> Any:
@@ -33,8 +38,8 @@ class CoordinationMetrics:
     utilization: Dict[str, AgentUtilization]
     contribution: Dict[str, ObservedContribution]
     lineage: Lineage = field(default_factory=Lineage)
-    communication: Any = None
-    redundancy: Any = None
+    communication: Optional[CommunicationMetrics] = None
+    redundancy: Optional[RedundancyMetrics] = None
     dependency: Any = None
     context: Any = None
     graph: Optional[ExecutionGraph] = field(default=None, repr=False, compare=False)
@@ -63,15 +68,19 @@ class CoordinationMetrics:
 def compute_coordination(traj: Trajectory, graph: Optional[ExecutionGraph] = None, similarity: Any = None,
                          smell_config: Any = None,
                          efficiency: Optional[EfficiencyMetrics] = None) -> CoordinationMetrics:
-    """Coordination metrics of one run.  ``similarity`` and ``smell_config``
-    are accepted for the redundancy and diagnostics analyses (not used yet);
-    ``efficiency`` avoids recomputing the run's efficiency metrics."""
+    """Coordination metrics of one run.  ``similarity`` is the artifact
+    redundancy backend (anything ``resolve_similarity`` accepts; resolve it
+    once and pass the instance when analysing many runs); ``smell_config`` is
+    accepted for the diagnostics analysis (not used yet); ``efficiency``
+    avoids recomputing the run's efficiency metrics."""
     graph = graph or build_graph(traj)
     lineage = final_lineage(traj)
     return CoordinationMetrics(
         run_id=traj.run_id, coverage=graph.coverage,
         utilization=compute_utilization(traj, graph, efficiency),
-        contribution=compute_contribution(traj, graph, lineage), lineage=lineage, graph=graph)
+        contribution=compute_contribution(traj, graph, lineage), lineage=lineage,
+        communication=compute_communication(traj, graph),
+        redundancy=compute_redundancy(traj, graph, resolve_similarity(similarity)), graph=graph)
 
 
 @dataclass
@@ -85,6 +94,8 @@ class CoordinationSummary:
     dead_agents_per_run: Summary
     utilization: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     contribution: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    communication: Optional[CommunicationSummary] = None
+    redundancy: Optional[RedundancySummary] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -93,6 +104,7 @@ class CoordinationSummary:
             "derivation_coverage": _dict(self.derivation_coverage),
             "dead_agents_per_run": self.dead_agents_per_run.to_dict(),
             "utilization": self.utilization, "contribution": self.contribution,
+            "communication": _dict(self.communication), "redundancy": _dict(self.redundancy),
         }
 
 
@@ -112,10 +124,15 @@ def summarize_coordination(per_run: Sequence[CoordinationMetrics]) -> Coordinati
             for k in ("messages_sent", "artifacts_produced", "downstream_refs"):
                 util[aid][k].append(float(getattr(u, k)))
     utilization = {aid: {k: mean(v) for k, v in d.items()} for aid, d in util.items()}
+    comm = [cm.communication for cm in per_run if cm.communication is not None]
+    red = [cm.redundancy for cm in per_run if cm.redundancy is not None]
     return CoordinationSummary(
         n_runs=len(per_run),
         message_receive_coverage=_known([cm.coverage.message_receive_coverage for cm in per_run]),
         derivation_coverage=_known([cm.coverage.derivation_coverage for cm in per_run]),
         dead_agents_per_run=summarize([len(cm.dead_agents) for cm in per_run]),
         utilization=utilization,
-        contribution=summarize_contribution([cm.contribution for cm in per_run]))
+        contribution=summarize_contribution([cm.contribution for cm in per_run]),
+        # runs computed elsewhere may lack an analysis: summarise the ones that have it
+        communication=summarize_communication(comm) if comm else None,
+        redundancy=summarize_redundancy(red) if red else None)

@@ -265,7 +265,7 @@ def test_invocation_edges_link_parent_frontier_child_and_resume():
     assert inv == {(b1.node_id, wk.node_id), (wk.node_id, b2.node_id)}
     assert g.preds(b2.node_id) == [wk.node_id]          # not chained to b1 directly: the child sits between
     assert any(e.kind == "invocation" and (e.source, e.target) == ("boss", "worker") for e in g.agent_edges)
-    assert g.fan_out("boss") == 1 and g.fan_in("worker") == 1
+    assert g.fan_out("boss") == 0 and g.fan_in("worker") == 0      # invocation is not communication fan
 
 
 def test_wait_on_links_what_was_awaited():

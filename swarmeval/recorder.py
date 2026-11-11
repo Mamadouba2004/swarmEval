@@ -36,7 +36,7 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, Iterator, List, Opt
 
 from .pricing import DEFAULT_PRICING, PricingTable
 from .schema import (SCHEMA_VERSION, Artifact, Event, EventType, Span, Status, Task, TextPolicy, Trajectory,
-                     content_hash, estimate_tokens, new_id, preview, to_text)
+                     canonical_args, content_hash, estimate_tokens, new_id, preview, to_text)
 
 
 # --------------------------------------------------------------------------- #
@@ -723,8 +723,9 @@ class AgentSpan:
                           content=ctx._text(call.result) if call.result is not None else None,
                           content_tokens=estimate_tokens(call.result) if call.result is not None else 0,
                           content_hash=content_hash(call.result) if call.result is not None else None,
-                          input_artifacts=list(call.input_artifacts), metadata=dict(call.metadata), timestamp=t0,
-                          event_id=call.event_id)
+                          input_artifacts=list(call.input_artifacts), timestamp=t0, event_id=call.event_id,
+                          # hashed in full: tool_args may be a preview or truncated
+                          metadata={**call.metadata, "args_hash": content_hash(canonical_args(call.args))})
 
     def call_tool(self, name: str, fn: Callable[..., Any], *args: Any,
                   input_artifacts: Iterable[Union[Artifact, str]] = (), **kwargs: Any) -> Any:

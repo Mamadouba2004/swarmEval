@@ -92,6 +92,27 @@ def content_hash(obj: Any) -> str:
     return hashlib.sha1(to_text(obj).encode("utf-8")).hexdigest()
 
 
+def _normalize(obj: Any) -> Any:
+    if isinstance(obj, (str, bool, int, float)) or obj is None:
+        return obj  # strings as given: case and spacing matter in paths, ids and code
+    if isinstance(obj, dict):
+        # a typed key keeps 1 and "1" apart
+        return {k if isinstance(k, str) else f"{type(k).__name__}:{k!r}": _normalize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_normalize(v) for v in obj]
+    if isinstance(obj, (set, frozenset)):
+        return sorted((_normalize(v) for v in obj), key=repr)
+    return obj
+
+
+def canonical_args(args: Any) -> str:
+    """Stable text form of tool arguments: key and set order are ignored,
+    strings are compared as given (``{"query": "S1"}`` and ``{"query": "s1"}``
+    or ``" S1"`` differ).  Other values are compared by ``repr``, so objects
+    whose repr contains a memory address won't match across runs."""
+    return json.dumps(_normalize(args), sort_keys=True, default=repr)
+
+
 def preview(obj: Any, limit: int = 240) -> str:
     text = to_text(obj)
     return text if len(text) <= limit else text[: limit - 1] + "…"
@@ -535,6 +556,12 @@ class Trajectory:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Trajectory":
+        metadata = dict(d.get("metadata", {}))
+        # loaded data went through the text policy: text may be gone for good
+        texts = [a.get("content") for a in d.get("artifacts", {}).values()] + [d.get("final_output")]
+        if (not TextPolicy.from_metadata(metadata).capture
+                or any(isinstance(t, str) and t.endswith("…[truncated]") for t in texts)):
+            metadata["text_truncated"] = True
         return cls(
             run_id=d["run_id"],
             task_id=d["task_id"],
@@ -551,7 +578,7 @@ class Trajectory:
             status=d.get("status", "success"),
             error=d.get("error"),
             evaluation=Evaluation.from_dict(d["evaluation"]) if d.get("evaluation") else None,
-            metadata=d.get("metadata", {}),
+            metadata=metadata,
         )
 
     def save(self, path: str) -> None:
