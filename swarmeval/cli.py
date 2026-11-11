@@ -145,6 +145,9 @@ def cmd_demo(args: argparse.Namespace) -> int:
         print(f"swarmeval: --run {args.run or 0} out of range (result has {len(result.runs)} runs); "
               "HTML report not written", file=sys.stderr)
         return code
+    if args.html and args.run is not None and not len(result.runs):
+        print(f"swarmeval: --run {args.run} ignored (no runs to show); wrote a summary-only HTML report",
+              file=sys.stderr)
     _write_html(result, args)
     return code
 
