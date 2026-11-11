@@ -60,7 +60,8 @@ def _write_plain_evaluation(exc: AnalysisFailed, out: Optional[str]) -> int:
     print(exc.result.report())
     _write_outputs(exc.result, out)
     cause = exc.__cause__
-    print(f"swarmeval: coordination analysis failed: {type(cause).__name__}: {cause}; plain evaluation written",
+    done = f"written to {out}" if out else "shown"
+    print(f"swarmeval: coordination analysis failed: {type(cause).__name__}: {cause}; plain evaluation {done}",
           file=sys.stderr)
     return 1
 
@@ -100,17 +101,27 @@ def _load_runs_or_exit(path: str):
         raise SystemExit(f"swarmeval: {exc}")
 
 
+def _analysis_failed(exc: Exception) -> None:
+    print(f"swarmeval: coordination analysis failed: {type(exc).__name__}: {exc}; showing the plain evaluation "
+          "(rerun with --no-coordination to skip it)", file=sys.stderr)
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     runs = _load_runs_or_exit(args.path)
     pricing = PricingTable.load(args.pricing) if args.pricing else None
-    result = analyze_runs(runs, pricing=pricing)
+    code = 0
+    try:
+        result = analyze_runs(runs, pricing=pricing)
+    except Exception as exc:  # every run failed the same way: the runs are on disk, show what still holds
+        _analysis_failed(exc)
+        result, code = analyze_runs(runs, pricing=pricing, coordination=False), 1
     print(result.report())
     if args.trace is not None:
         if not 0 <= args.trace < len(runs):
             raise SystemExit(f"swarmeval: --trace {args.trace} out of range (file has {len(runs)} runs)")
         print()
         print(render_trajectory(runs.trajectories[args.trace]))
-    return 0
+    return code
 
 
 def cmd_compare(args: argparse.Namespace) -> int:
