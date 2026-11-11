@@ -43,6 +43,8 @@ Classes:
   ``propagated``. Has its own lock.
 - _Mailbox: Per-agent message queues (storage only), with their own lock.
 - RunContext: Everything a swarm needs during one run: recording, messaging, seeded randomness and the clock.
+- _LLMRecorder, _ToolRecorder, _ArtifactRecorder: Record one span's LLM calls, tool calls and artifacts; the
+  AgentSpan methods of the same names delegate to them.
 - AgentSpan: Context manager (sync or async) for one agent invocation.
 """
 from __future__ import annotations
@@ -549,6 +551,206 @@ class RunContext:
         return self.pricing.cost(model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
 
 
+class _LLMRecorder:
+
+    def __init__(self, span: AgentSpan) -> None:
+        self.span = span
+
+    @contextmanager
+    def llm_call(self, model: str | None = None, input_tokens: int = 0, output_tokens: int = 0,
+                 input_artifacts: Iterable[Artifact | str] = (), prompt: Any = None,
+                 **metadata: Any) -> Iterator[LLMCall]:
+        """Record one LLM call; see ``AgentSpan.llm_call``."""
+        span = self.span
+        ctx = span.ctx
+        call = LLMCall(model or span.model, input_tokens, output_tokens, _ids(input_artifacts), prompt)
+        call.metadata.update(metadata)
+        t0 = ctx.now()
+        token = _current_llm_call.set(call)
+        call_token = _enter_call(span, call)
+        try:
+            yield call
+        except Exception as exc:
+            call.metadata.update(ctx._errors.propagation_meta(exc))
+            ev = self._record_llm(call, t0, Status.ERROR.value, f"{type(exc).__name__}: {exc}")
+            ctx._errors.mark(exc, ev.event_id)
+            raise
+        finally:
+            _current_call.reset(call_token)
+            _current_llm_call.reset(token)
+        self._record_llm(call, t0, Status.SUCCESS.value, None)
+
+    def _record_llm(self, call: LLMCall, t0: float, status: str, error: str | None) -> Event:
+        """Record an LLM_CALL event for ``call`` started at ``t0``."""
+        ctx = self.span.ctx
+        end = ctx.now()
+        meta = dict(call.metadata)
+        if call.prompt is not None:
+            meta["prompt"] = ctx._text(to_text(call.prompt))
+            meta["prompt_hash"] = content_hash(call.prompt)
+        tin, tout = int(call.input_tokens), int(call.output_tokens)
+        cr, cw = int(call.cache_read_tokens), int(call.cache_write_tokens)
+        return ctx.record(EventType.LLM_CALL, _span=self.span, model=call.model, input_tokens=tin, output_tokens=tout,
+                          cache_read_tokens=cr, cache_write_tokens=cw,
+                          cost_usd=None if meta.get("cost_unknown") else ctx.cost_of(call.model, tin, tout, cr, cw),
+                          latency_ms=(end - t0) * 1000.0, status=status, error=error,
+                          content=ctx._text(call.output) if call.output is not None else None,
+                          content_tokens=estimate_tokens(call.output) if call.output is not None else 0,
+                          content_hash=content_hash(call.output) if call.output is not None else None,
+                          input_artifacts=list(call.input_artifacts), metadata=meta, timestamp=t0,
+                          event_id=call.event_id)
+
+    @staticmethod
+    def _llm_args(fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any],
+                  prompt: Any) -> tuple[tuple[Any, ...], Any]:
+        """Arguments for ``fn`` and the prompt to record: ``prompt=`` alone is passed when ``fn`` takes a
+        positional argument, and without ``prompt=`` the arguments are recorded as the prompt."""
+        if prompt is not None and not args and not kwargs and _takes_positional(fn):
+            args = (prompt,)
+        return args, prompt if prompt is not None else _call_record(args, kwargs)
+
+    @staticmethod
+    def _finish_llm(call: LLMCall, result: Any, input_tokens: int | None,
+                    output_tokens: int | None) -> Any:
+        """Fill ``call`` from ``fn``'s result, estimating missing tokens, and return the output text."""
+        instrumented = bool(call.metadata.get("api_calls"))
+        if isinstance(result, LLMResult):
+            if not instrumented:
+                call.input_tokens = result.input_tokens
+                call.output_tokens = result.output_tokens
+                call.cache_read_tokens = result.cache_read_tokens
+                call.cache_write_tokens = result.cache_write_tokens
+                if result.model:
+                    call.model = result.model
+            out = result.text
+        else:
+            out = result
+        call.output = out
+        if input_tokens is not None:
+            call.input_tokens = input_tokens
+        if output_tokens is not None:
+            call.output_tokens = output_tokens
+        if not call.input_tokens and not call.cache_read_tokens and call.prompt is not None:
+            call.input_tokens = estimate_tokens(call.prompt)
+            call.metadata["input_tokens_estimated"] = True
+        if not call.output_tokens and out is not None:
+            call.output_tokens = estimate_tokens(out)
+            call.metadata["output_tokens_estimated"] = True
+        return out
+
+    def llm(self, fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any], model: str | None,
+            input_artifacts: Iterable[Artifact | str], prompt: Any, input_tokens: int | None,
+            output_tokens: int | None) -> Any:
+        """Body of ``AgentSpan.llm``."""
+        args, recorded = self._llm_args(fn, args, kwargs, prompt)
+        with self.llm_call(model=model, input_artifacts=input_artifacts, prompt=recorded) as call:
+            result = fn(*args, **kwargs)
+            _reject_awaitable(result, "llm", "allm")
+            return self._finish_llm(call, result, input_tokens, output_tokens)
+
+    async def allm(self, fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any],
+                   model: str | None, input_artifacts: Iterable[Artifact | str], prompt: Any,
+                   input_tokens: int | None, output_tokens: int | None) -> Any:
+        """Body of ``AgentSpan.allm``."""
+        args, recorded = self._llm_args(fn, args, kwargs, prompt)
+        with self.llm_call(model=model, input_artifacts=input_artifacts, prompt=recorded) as call:
+            result = fn(*args, **kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+            return self._finish_llm(call, result, input_tokens, output_tokens)
+
+
+class _ToolRecorder:
+
+    def __init__(self, span: AgentSpan) -> None:
+        self.span = span
+
+    @contextmanager
+    def tool_call(self, name: str, args: Any = None,
+                  input_artifacts: Iterable[Artifact | str] = ()) -> Iterator[ToolCall]:
+        """Record one tool call; see ``AgentSpan.tool_call``."""
+        ctx = self.span.ctx
+        call = ToolCall(name, args, _ids(input_artifacts))
+        t0 = ctx.now()
+        call_token = _enter_call(self.span, call)
+        try:
+            yield call
+        except Exception as exc:
+            call.metadata.update(ctx._errors.propagation_meta(exc))
+            ev = self._record_tool(call, t0, Status.ERROR.value, f"{type(exc).__name__}: {exc}")
+            ctx._errors.mark(exc, ev.event_id)
+            raise
+        finally:
+            _current_call.reset(call_token)
+        self._record_tool(call, t0, Status.SUCCESS.value, None)
+
+    def _record_tool(self, call: ToolCall, t0: float, status: str, error: str | None) -> Event:
+        """Record a TOOL_CALL event for ``call`` started at ``t0``."""
+        ctx = self.span.ctx
+        end = ctx.now()
+        return ctx.record(EventType.TOOL_CALL, _span=self.span, tool_name=call.name,
+                          tool_args=ctx._text(call.args),
+                          latency_ms=(end - t0) * 1000.0, status=status, error=error,
+                          content=ctx._text(call.result) if call.result is not None else None,
+                          content_tokens=estimate_tokens(call.result) if call.result is not None else 0,
+                          content_hash=content_hash(call.result) if call.result is not None else None,
+                          input_artifacts=list(call.input_artifacts), timestamp=t0, event_id=call.event_id,
+                          metadata={**call.metadata, "args_hash": content_hash(canonical_args(call.args))})
+
+    def call_tool(self, name: str, fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any],
+                  input_artifacts: Iterable[Artifact | str]) -> Any:
+        """Body of ``AgentSpan.call_tool``."""
+        recorded_args: Any = {"args": list(args), **kwargs} if args else dict(kwargs)
+        with self.tool_call(name, recorded_args, input_artifacts=input_artifacts) as call:
+            result = fn(*args, **kwargs)
+            _reject_awaitable(result, "call_tool", "acall_tool")
+            call.result = result
+            return result
+
+    async def acall_tool(self, name: str, fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any],
+                         input_artifacts: Iterable[Artifact | str]) -> Any:
+        """Body of ``AgentSpan.acall_tool``."""
+        recorded_args: Any = {"args": list(args), **kwargs} if args else dict(kwargs)
+        with self.tool_call(name, recorded_args, input_artifacts=input_artifacts) as call:
+            result = fn(*args, **kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+            call.result = result
+            return result
+
+
+class _ArtifactRecorder:
+
+    def __init__(self, span: AgentSpan) -> None:
+        self.span = span
+
+    def produce(self, name: str, content: Any, derived_from: Iterable[Artifact | str] | None,
+                metadata: dict[str, Any]) -> Artifact:
+        """Body of ``AgentSpan.produce``."""
+        span = self.span
+        ctx = span.ctx
+        sources = None if derived_from is None else _ids(derived_from)
+        art = Artifact(new_id("art"), name, span.agent_id, span.span_id, ctx.now(), content,
+                       content_hash(content), estimate_tokens(content), None, dict(metadata), sources)
+        ev = ctx.record(EventType.ARTIFACT, _span=span, kind=name, content=ctx._text(content),
+                        content_tokens=art.tokens, content_hash=art.content_hash,
+                        input_artifacts=list(sources or []), output_artifacts=[art.artifact_id],
+                        metadata=dict(metadata), timestamp=art.produced_at)
+        art.event_id = ev.event_id
+        with ctx._lock:
+            ctx.trajectory.artifacts[art.artifact_id] = art
+        return art
+
+    def consume(self, artifact: Artifact | str, purpose: str | None) -> Artifact | None:
+        """Body of ``AgentSpan.consume``."""
+        ctx = self.span.ctx
+        art_id = artifact.artifact_id if isinstance(artifact, Artifact) else str(artifact)
+        art = ctx.trajectory.artifacts.get(art_id)
+        ctx.record(EventType.ARTIFACT_USE, _span=self.span, kind=art.name if art else None,
+                   input_artifacts=[art_id], metadata={"purpose": purpose} if purpose else {})
+        return art
+
+
 class AgentSpan:
 
     def __init__(self, ctx: RunContext, agent_id: str, role: str | None, model: str | None,
@@ -564,6 +766,9 @@ class AgentSpan:
         self._token: Any = None
         self._closed = False
         self.span: Span | None = None
+        self._llm = _LLMRecorder(self)
+        self._tools = _ToolRecorder(self)
+        self._artifacts = _ArtifactRecorder(self)
 
     def __enter__(self) -> AgentSpan:
         ctx = self.ctx
@@ -627,81 +832,8 @@ class AgentSpan:
                  **metadata: Any) -> Iterator[LLMCall]:
         """Record one LLM call.  Set ``call.input_tokens`` / ``call.output_tokens``
         / ``call.output`` inside the block when they become known."""
-        ctx = self.ctx
-        call = LLMCall(model or self.model, input_tokens, output_tokens, _ids(input_artifacts), prompt)
-        call.metadata.update(metadata)
-        t0 = ctx.now()
-        token = _current_llm_call.set(call)
-        call_token = _enter_call(self, call)
-        try:
+        with self._llm.llm_call(model, input_tokens, output_tokens, input_artifacts, prompt, **metadata) as call:
             yield call
-        except Exception as exc:
-            call.metadata.update(ctx._errors.propagation_meta(exc))
-            ev = self._record_llm(call, t0, Status.ERROR.value, f"{type(exc).__name__}: {exc}")
-            ctx._errors.mark(exc, ev.event_id)
-            raise
-        finally:
-            _current_call.reset(call_token)
-            _current_llm_call.reset(token)
-        self._record_llm(call, t0, Status.SUCCESS.value, None)
-
-    def _record_llm(self, call: LLMCall, t0: float, status: str, error: str | None) -> Event:
-        """Record an LLM_CALL event for ``call`` started at ``t0``."""
-        ctx = self.ctx
-        end = ctx.now()
-        meta = dict(call.metadata)
-        if call.prompt is not None:
-            meta["prompt"] = ctx._text(to_text(call.prompt))
-            meta["prompt_hash"] = content_hash(call.prompt)
-        tin, tout = int(call.input_tokens), int(call.output_tokens)
-        cr, cw = int(call.cache_read_tokens), int(call.cache_write_tokens)
-        return ctx.record(EventType.LLM_CALL, _span=self, model=call.model, input_tokens=tin, output_tokens=tout,
-                          cache_read_tokens=cr, cache_write_tokens=cw,
-                          cost_usd=None if meta.get("cost_unknown") else ctx.cost_of(call.model, tin, tout, cr, cw),
-                          latency_ms=(end - t0) * 1000.0, status=status, error=error,
-                          content=ctx._text(call.output) if call.output is not None else None,
-                          content_tokens=estimate_tokens(call.output) if call.output is not None else 0,
-                          content_hash=content_hash(call.output) if call.output is not None else None,
-                          input_artifacts=list(call.input_artifacts), metadata=meta, timestamp=t0,
-                          event_id=call.event_id)
-
-    @staticmethod
-    def _llm_args(fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any],
-                  prompt: Any) -> tuple[tuple[Any, ...], Any]:
-        """Arguments for ``fn`` and the prompt to record: ``prompt=`` alone is passed when ``fn`` takes a
-        positional argument, and without ``prompt=`` the arguments are recorded as the prompt."""
-        if prompt is not None and not args and not kwargs and _takes_positional(fn):
-            args = (prompt,)
-        return args, prompt if prompt is not None else _call_record(args, kwargs)
-
-    @staticmethod
-    def _finish_llm(call: LLMCall, result: Any, input_tokens: int | None,
-                    output_tokens: int | None) -> Any:
-        """Fill ``call`` from ``fn``'s result, estimating missing tokens, and return the output text."""
-        instrumented = bool(call.metadata.get("api_calls"))
-        if isinstance(result, LLMResult):
-            if not instrumented:
-                call.input_tokens = result.input_tokens
-                call.output_tokens = result.output_tokens
-                call.cache_read_tokens = result.cache_read_tokens
-                call.cache_write_tokens = result.cache_write_tokens
-                if result.model:
-                    call.model = result.model
-            out = result.text
-        else:
-            out = result
-        call.output = out
-        if input_tokens is not None:
-            call.input_tokens = input_tokens
-        if output_tokens is not None:
-            call.output_tokens = output_tokens
-        if not call.input_tokens and not call.cache_read_tokens and call.prompt is not None:
-            call.input_tokens = estimate_tokens(call.prompt)
-            call.metadata["input_tokens_estimated"] = True
-        if not call.output_tokens and out is not None:
-            call.output_tokens = estimate_tokens(out)
-            call.metadata["output_tokens_estimated"] = True
-        return out
 
     def llm(self, fn: Callable[..., Any], *args: Any, model: str | None = None,
             input_artifacts: Iterable[Artifact | str] = (), prompt: Any = None,
@@ -709,75 +841,31 @@ class AgentSpan:
             **kwargs: Any) -> Any:
         """Run ``fn(*args, **kwargs)`` as a recorded LLM call: an ``LLMResult`` supplies token usage and its
         ``text`` is returned, otherwise tokens are estimated from the prompt and output."""
-        args, recorded = self._llm_args(fn, args, kwargs, prompt)
-        with self.llm_call(model=model, input_artifacts=input_artifacts, prompt=recorded) as call:
-            result = fn(*args, **kwargs)
-            _reject_awaitable(result, "llm", "allm")
-            return self._finish_llm(call, result, input_tokens, output_tokens)
+        return self._llm.llm(fn, args, kwargs, model, input_artifacts, prompt, input_tokens, output_tokens)
 
     async def allm(self, fn: Callable[..., Any], *args: Any, model: str | None = None,
                    input_artifacts: Iterable[Artifact | str] = (), prompt: Any = None,
                    input_tokens: int | None = None, output_tokens: int | None = None,
                    **kwargs: Any) -> Any:
         """Async ``llm``: awaits ``fn(*args, **kwargs)`` so latency and usage are real."""
-        args, recorded = self._llm_args(fn, args, kwargs, prompt)
-        with self.llm_call(model=model, input_artifacts=input_artifacts, prompt=recorded) as call:
-            result = fn(*args, **kwargs)
-            if inspect.isawaitable(result):
-                result = await result
-            return self._finish_llm(call, result, input_tokens, output_tokens)
+        return await self._llm.allm(fn, args, kwargs, model, input_artifacts, prompt, input_tokens, output_tokens)
 
     @contextmanager
     def tool_call(self, name: str, args: Any = None,
                   input_artifacts: Iterable[Artifact | str] = ()) -> Iterator[ToolCall]:
         """Record one tool call; set ``call.result`` inside the block."""
-        ctx = self.ctx
-        call = ToolCall(name, args, _ids(input_artifacts))
-        t0 = ctx.now()
-        call_token = _enter_call(self, call)
-        try:
+        with self._tools.tool_call(name, args, input_artifacts) as call:
             yield call
-        except Exception as exc:
-            call.metadata.update(ctx._errors.propagation_meta(exc))
-            ev = self._record_tool(call, t0, Status.ERROR.value, f"{type(exc).__name__}: {exc}")
-            ctx._errors.mark(exc, ev.event_id)
-            raise
-        finally:
-            _current_call.reset(call_token)
-        self._record_tool(call, t0, Status.SUCCESS.value, None)
-
-    def _record_tool(self, call: ToolCall, t0: float, status: str, error: str | None) -> Event:
-        """Record a TOOL_CALL event for ``call`` started at ``t0``."""
-        ctx = self.ctx
-        end = ctx.now()
-        return ctx.record(EventType.TOOL_CALL, _span=self, tool_name=call.name, tool_args=ctx._text(call.args),
-                          latency_ms=(end - t0) * 1000.0, status=status, error=error,
-                          content=ctx._text(call.result) if call.result is not None else None,
-                          content_tokens=estimate_tokens(call.result) if call.result is not None else 0,
-                          content_hash=content_hash(call.result) if call.result is not None else None,
-                          input_artifacts=list(call.input_artifacts), timestamp=t0, event_id=call.event_id,
-                          metadata={**call.metadata, "args_hash": content_hash(canonical_args(call.args))})
 
     def call_tool(self, name: str, fn: Callable[..., Any], *args: Any,
                   input_artifacts: Iterable[Artifact | str] = (), **kwargs: Any) -> Any:
         """Managed tool call: runs ``fn(*args, **kwargs)`` and records it."""
-        recorded_args: Any = {"args": list(args), **kwargs} if args else dict(kwargs)
-        with self.tool_call(name, recorded_args, input_artifacts=input_artifacts) as call:
-            result = fn(*args, **kwargs)
-            _reject_awaitable(result, "call_tool", "acall_tool")
-            call.result = result
-            return result
+        return self._tools.call_tool(name, fn, args, kwargs, input_artifacts)
 
     async def acall_tool(self, name: str, fn: Callable[..., Any], *args: Any,
                          input_artifacts: Iterable[Artifact | str] = (), **kwargs: Any) -> Any:
         """Async ``call_tool``: awaits ``fn(*args, **kwargs)``."""
-        recorded_args: Any = {"args": list(args), **kwargs} if args else dict(kwargs)
-        with self.tool_call(name, recorded_args, input_artifacts=input_artifacts) as call:
-            result = fn(*args, **kwargs)
-            if inspect.isawaitable(result):
-                result = await result
-            call.result = result
-            return result
+        return await self._tools.acall_tool(name, fn, args, kwargs, input_artifacts)
 
     def send(self, receiver: str, content: Any, kind: str = "information",
              artifacts: Iterable[Artifact | str] = (), reply_to: Message | str | None = None,
@@ -798,26 +886,11 @@ class AgentSpan:
                 **metadata: Any) -> Artifact:
         """Record an artifact; ``derived_from`` lists its sources (``[]`` = none), and leaving it out records
         "unknown", which lineage then approximates from what the span consumed."""
-        ctx = self.ctx
-        sources = None if derived_from is None else _ids(derived_from)
-        art = Artifact(new_id("art"), name, self.agent_id, self.span_id, ctx.now(), content,
-                       content_hash(content), estimate_tokens(content), None, dict(metadata), sources)
-        ev = ctx.record(EventType.ARTIFACT, _span=self, kind=name, content=ctx._text(content),
-                        content_tokens=art.tokens, content_hash=art.content_hash,
-                        input_artifacts=list(sources or []), output_artifacts=[art.artifact_id],
-                        metadata=dict(metadata), timestamp=art.produced_at)
-        art.event_id = ev.event_id
-        with ctx._lock:
-            ctx.trajectory.artifacts[art.artifact_id] = art
-        return art
+        return self._artifacts.produce(name, content, derived_from, metadata)
 
     def consume(self, artifact: Artifact | str, purpose: str | None = None) -> Artifact | None:
         """Record that this agent used ``artifact`` and return it."""
-        art_id = artifact.artifact_id if isinstance(artifact, Artifact) else str(artifact)
-        art = self.ctx.trajectory.artifacts.get(art_id)
-        self.ctx.record(EventType.ARTIFACT_USE, _span=self, kind=art.name if art else None,
-                        input_artifacts=[art_id], metadata={"purpose": purpose} if purpose else {})
-        return art
+        return self._artifacts.consume(artifact, purpose)
 
     def wait(self, reason: str, seconds: float,
              on: WaitTarget | Iterable[WaitTarget] | None = None) -> None:
