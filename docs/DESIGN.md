@@ -144,8 +144,8 @@ Each detector owns its thresholds: `register_smell(name, detector, smells=None, 
 | `comm_high` | `communication_overhead.high` |
 | `comm_min_messages` | `communication_overhead.min_messages` |
 
-Detectors are registered, not hard-coded. `register_smell(name, detector, smells=None)` runs `detector(ctx)` with a `SmellContext` and adds the smells it emits to `SMELLS`, which sets the output order.
-* Registering a name again replaces its detector and its smells.
+Detectors are registered, not hard-coded. `register_smell(name, detector, smells=None, config_cls=None)` runs `detector(ctx, section)` as described above and adds the smells it emits to `SMELLS`, which sets the output order.
+* Registering a name again replaces its detector, its smells and its `config_cls`.
 * Claiming a smell that another registration already emits is a ValueError.
 * Custom smells are Python API only; there is no CLI plugin loading.
 
