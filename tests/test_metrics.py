@@ -152,6 +152,14 @@ def test_coordination_rows_separators_follow_registry_order(monkeypatch):
                     + family["dependency"] + [None] + rows[-2:])
 
 
+def test_coordination_extra_is_last_field():
+    from dataclasses import fields
+
+    from swarmeval.metrics.coordination import CoordinationMetrics, CoordinationSummary
+    assert fields(CoordinationSummary)[-1].name == "extra"
+    assert fields(CoordinationMetrics)[-1].name == "extra"
+
+
 def test_default_to_dict_has_no_extra():
     res = analyze_runs(RunSet("lbl", "bench", [_traj("t1", 0, True, 1.0)]))
     assert res.coordination.extra == {} and res.per_run_coordination[0].extra == {}

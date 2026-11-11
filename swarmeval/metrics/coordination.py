@@ -138,8 +138,8 @@ class CoordinationMetrics(_Analyses):
     dependency: DependencyMetrics | None = None
     context: ContextMetrics | None = None
     diagnostics: list[Diagnostic] = field(default_factory=list)
-    extra: dict[str, Any] = field(default_factory=dict)
     graph: ExecutionGraph | None = field(default=None, repr=False, compare=False)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     @property
     def dead_agents(self) -> list[str]:
