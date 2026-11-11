@@ -236,8 +236,8 @@ class EvaluationResult:
 
     @classmethod
     def load(cls, path: str, pricing: PricingTable | None = None) -> EvaluationResult:
-        """Reload a saved result (re-priced with ``pricing`` if given)."""
-        return analyze_runs(load_runset(path), pricing=pricing)
+        """Reload a saved result with default analysis options; see ``load_result``."""
+        return load_result(path, pricing=pricing)
 
     def report(self, **kwargs: Any) -> str:
         """The result as a text report."""
@@ -269,6 +269,11 @@ def load_runset(path: str) -> RunSet:
     if "trajectories" in d:
         return RunSet.from_dict(d)
     raise ValueError(f"{path} has no trajectories; save with include_runs=True to reload")
+
+
+def load_result(path: str, *, pricing: PricingTable | None = None, **analysis_kwargs: Any) -> EvaluationResult:
+    """Reload a saved result, re-priced with ``pricing`` if given and re-analysed with ``analyze_runs`` options."""
+    return analyze_runs(load_runset(path), pricing=pricing, **analysis_kwargs)
 
 
 def analyze_runs(runs: RunSet, pricing: PricingTable | None = None, coordination: bool = True,

@@ -101,6 +101,17 @@ def test_runset_and_result_roundtrip(tmp_path):
     assert "runs" not in d and len(d["per_run"]) == 2
 
 
+def test_load_result_passes_analysis_options(tmp_path):
+    from swarmeval.evaluate import load_result
+    res = evaluate(make_swarm, build_benchmark(2), trials=1, clock_factory=SimClock)
+    p = tmp_path / "r.json"
+    res.save(str(p))
+    plain = load_result(str(p), coordination=False)
+    assert plain.coordination is None and plain.per_run_coordination is None
+    assert plain.success_rate == res.success_rate
+    assert load_result(str(p)).summary() == EvaluationResult.load(str(p)).summary() == res.summary()
+
+
 def test_jsonl_export(tmp_path):
     res = evaluate(make_swarm, build_benchmark(1), trials=1, clock_factory=SimClock)
     traj = res.runs.trajectories[0]
