@@ -215,27 +215,15 @@ def _as_runs(x: Any) -> RunSet:
     raise TypeError(f"expected an EvaluationResult or RunSet, got {type(x).__name__}")
 
 
-def compare(baseline: Any, candidate: Any, pricing: PricingTable | None = None, coordination: bool = True,
-            similarity: Any = None, smell_config: Any = None) -> Comparison:
-    """Compare ``candidate`` with ``baseline`` (EvaluationResult or RunSet) on shared tasks, priced alike
-    with ``pricing``; ``coordination``, ``similarity`` and ``smell_config`` go to ``analyze_runs`` for both."""
-    base_runs, cand_runs = _as_runs(baseline), _as_runs(candidate)
+def _warnings(base_runs: RunSet, cand_runs: RunSet, b: EvaluationResult, c: EvaluationResult, n_shared: int,
+              only_b: list[str], only_c: list[str], seeds_differ: bool) -> list[str]:
+    """What makes the comparison less than like for like, in report order."""
     warnings: list[str] = []
     if base_runs.benchmark_name != cand_runs.benchmark_name:
         warnings.append(f"different benchmarks: {base_runs.benchmark_name!r} vs {cand_runs.benchmark_name!r}")
-    base_ids, cand_ids = base_runs.task_ids(), cand_runs.task_ids()
-    shared = [t for t in base_ids if t in set(cand_ids)]
-    only_b = [t for t in base_ids if t not in set(cand_ids)]
-    only_c = [t for t in cand_ids if t not in set(base_ids)]
     if only_b or only_c:
-        warnings.append(f"compared on {len(shared)} shared task(s); {len(only_b)} only in baseline, "
+        warnings.append(f"compared on {n_shared} shared task(s); {len(only_b)} only in baseline, "
                         f"{len(only_c)} only in candidate")
-    if not shared:
-        raise ValueError("the two run sets have no task in common")
-
-    kw = dict(pricing=pricing, coordination=coordination, similarity=similarity, smell_config=smell_config)
-    b = analyze_runs(_subset(base_runs, shared), **kw)
-    c = analyze_runs(_subset(cand_runs, shared), **kw)
     for side, rs in (("baseline", base_runs), ("candidate", cand_runs)):
         if rs.metadata.get("interrupted"):
             warnings.append(f"{side} was interrupted after {len(rs)}/{rs.metadata.get('planned_runs', len(rs))} "
@@ -247,21 +235,13 @@ def compare(baseline: Any, candidate: Any, pricing: PricingTable | None = None, 
             warnings.append(f"{side} cost is incomplete (unpriced models); cost deltas are not reported")
     if b.performance.trials < 3 or c.performance.trials < 3:
         warnings.append("fewer than 3 trials per task: differences may be noise (significance testing is Phase 3)")
+    if seeds_differ:
+        warnings.append("paired runs used different seeds; per-run flips mix architecture and randomness")
+    return warnings
 
-    bv, cv = _values(b), _values(c)
-    metrics = [MetricDelta(k, label, bv[k], cv[k], hib, unit) for k, label, hib, unit in METRICS]
 
-    per_task: dict[str, dict[str, Any]] = {}
-    for tid in shared:
-        bt, ct = b.performance.per_task[tid], c.performance.per_task[tid]
-        per_task[tid] = {
-            "success_rate": (bt["success_rate"], ct["success_rate"]),
-            "score": (bt["score"], ct["score"]),
-            "cost_usd": (bt["cost_usd"] if bt["cost_complete"] else None,
-                         ct["cost_usd"] if ct["cost_complete"] else None),
-            "latency_s": (bt["latency_s"], ct["latency_s"]),
-        }
-
+def _flips(b: EvaluationResult, c: EvaluationResult) -> tuple[dict[str, list[tuple[str, int]]], int, bool]:
+    """Runs paired by task and trial: the success flips, the number of pairs and whether any pair's seeds differ."""
     b_runs = {(t.task_id, t.trial): t for t in b.runs.trajectories}
     flips: dict[str, list[tuple[str, int]]] = {"gained": [], "lost": []}
     paired = 0
@@ -276,9 +256,11 @@ def compare(baseline: Any, candidate: Any, pricing: PricingTable | None = None, 
             flips["gained"].append((t.task_id, t.trial))
         elif bt.succeeded and not t.succeeded:
             flips["lost"].append((t.task_id, t.trial))
-    if seeds_differ:
-        warnings.append("paired runs used different seeds; per-run flips mix architecture and randomness")
+    return flips, paired, seeds_differ
 
+
+def _per_agent(b: EvaluationResult, c: EvaluationResult) -> dict[str, dict[str, Any]]:
+    """Each agent's tokens, calls, cost and self time on both sides, and whether it was added or removed."""
     per_agent: dict[str, dict[str, Any]] = {}
     ba, ca = b.efficiency.per_agent, c.efficiency.per_agent
     for aid in list(ba) + [a for a in ca if a not in ba]:
@@ -291,5 +273,38 @@ def compare(baseline: Any, candidate: Any, pricing: PricingTable | None = None, 
                          y["cost_usd"] if y and y.get("cost_complete", True) else None),
             "self_time_s": (x["self_time_s"] if x else None, y["self_time_s"] if y else None),
         }
+    return per_agent
 
-    return Comparison(b, c, metrics, per_task, flips, paired, per_agent, shared, only_b, only_c, warnings)
+
+def compare(baseline: Any, candidate: Any, pricing: PricingTable | None = None, coordination: bool = True,
+            similarity: Any = None, smell_config: Any = None) -> Comparison:
+    """Compare ``candidate`` with ``baseline`` (EvaluationResult or RunSet) on shared tasks, priced alike
+    with ``pricing``; ``coordination``, ``similarity`` and ``smell_config`` go to ``analyze_runs`` for both."""
+    base_runs, cand_runs = _as_runs(baseline), _as_runs(candidate)
+    base_ids, cand_ids = base_runs.task_ids(), cand_runs.task_ids()
+    shared = [t for t in base_ids if t in set(cand_ids)]
+    only_b = [t for t in base_ids if t not in set(cand_ids)]
+    only_c = [t for t in cand_ids if t not in set(base_ids)]
+    if not shared:
+        raise ValueError("the two run sets have no task in common")
+
+    kw = dict(pricing=pricing, coordination=coordination, similarity=similarity, smell_config=smell_config)
+    b = analyze_runs(_subset(base_runs, shared), **kw)
+    c = analyze_runs(_subset(cand_runs, shared), **kw)
+    bv, cv = _values(b), _values(c)
+    metrics = [MetricDelta(k, label, bv[k], cv[k], hib, unit) for k, label, hib, unit in METRICS]
+
+    per_task: dict[str, dict[str, Any]] = {}
+    for tid in shared:
+        bt, ct = b.performance.per_task[tid], c.performance.per_task[tid]
+        per_task[tid] = {
+            "success_rate": (bt["success_rate"], ct["success_rate"]),
+            "score": (bt["score"], ct["score"]),
+            "cost_usd": (bt["cost_usd"] if bt["cost_complete"] else None,
+                         ct["cost_usd"] if ct["cost_complete"] else None),
+            "latency_s": (bt["latency_s"], ct["latency_s"]),
+        }
+
+    flips, paired, seeds_differ = _flips(b, c)
+    warnings = _warnings(base_runs, cand_runs, b, c, len(shared), only_b, only_c, seeds_differ)
+    return Comparison(b, c, metrics, per_task, flips, paired, _per_agent(b, c), shared, only_b, only_c, warnings)
