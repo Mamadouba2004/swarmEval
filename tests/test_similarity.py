@@ -1,5 +1,6 @@
 """Similarity backends and their resolution."""
 import builtins
+import importlib.util
 import sys
 
 import pytest
@@ -70,11 +71,27 @@ def test_embedding_pair_cap():
     assert emb.truncated is False
 
 
+def _fake_find_spec(monkeypatch, found):
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a, **kw: (
+        (object() if found else None) if name == "sentence_transformers" else real(name, *a, **kw)))
+
+
 def test_embedding_missing_extra(monkeypatch):
-    monkeypatch.setitem(sys.modules, "sentence_transformers", None)   # import now raises ImportError
+    _fake_find_spec(monkeypatch, found=True)                            # looks installed at construction ...
+    monkeypatch.setitem(sys.modules, "sentence_transformers", None)   # ... but the import raises ImportError
     emb = EmbeddingSimilarity()
     with pytest.raises(ImportError, match=r"pip install 'swarmeval\[embeddings\]', or pass embed_fn="):
         emb.scores(["a", "b"], [(0, 1)])
+
+
+def test_embedding_missing_extra_fails_at_construction(monkeypatch):
+    _fake_find_spec(monkeypatch, found=False)
+    with pytest.raises(ImportError, match=r"needs sentence-transformers: pip install 'swarmeval\[embeddings\]'"):
+        EmbeddingSimilarity()
+    with pytest.raises(ImportError, match="needs sentence-transformers"):
+        resolve_similarity("embeddings")
+    assert EmbeddingSimilarity(embed_fn=lambda texts: [[1.0]] * len(texts)).embed_fn is not None
 
 
 def test_resolve_similarity(monkeypatch):
@@ -88,6 +105,7 @@ def test_resolve_similarity(monkeypatch):
             raise AssertionError("imported too early")
         return real_import(name, *a, **kw)
 
+    _fake_find_spec(monkeypatch, found=True)
     monkeypatch.setattr(builtins, "__import__", guarded)
     emb = resolve_similarity("embeddings")
     monkeypatch.setattr(builtins, "__import__", real_import)

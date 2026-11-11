@@ -9,7 +9,7 @@ Redundancy needs "are these two texts saying the same thing?".  Two backends:
 * ``EmbeddingSimilarity``: cosine similarity of sentence embeddings, which
   catches paraphrase.  It needs an ``embed_fn`` or the optional
   ``sentence-transformers`` package (``pip install 'swarmeval[embeddings]'``),
-  imported only when first used.  Every pair is a candidate, so the number of
+  checked for when the backend is built and imported only when first used.  Every pair is a candidate, so the number of
   pairs is capped (``max_pairs``) and ``truncated`` says when the cap hit.
 
 Anything with ``name``, ``threshold``, ``candidates(texts)`` and
@@ -19,6 +19,7 @@ name, an import path (``"pkg.module:attr"``) or an instance into one.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import inspect
 import math
 import re
@@ -153,16 +154,22 @@ def cosine(a: Sequence[float], b: Sequence[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
+_NEEDS_ST = "EmbeddingSimilarity needs sentence-transformers: pip install 'swarmeval[embeddings]', or pass embed_fn="
+
+
 class EmbeddingSimilarity:
     """Cosine similarity of embeddings.  ``embed_fn(list_of_texts) ->
-    list_of_vectors``; without one, ``sentence-transformers`` is imported on
-    first use and ``model`` loaded.  Every pair is a candidate, capped at
+    list_of_vectors``; without one, ``sentence-transformers`` must be
+    installed (checked here, ImportError otherwise) and is imported on first
+    use, when ``model`` is loaded.  Every pair is a candidate, capped at
     ``max_pairs`` (``truncated`` is then True and later pairs are not
     compared, so redundancy can be under-counted)."""
     name = "embeddings"
 
     def __init__(self, embed_fn: Optional[Callable[[List[str]], Sequence[Sequence[float]]]] = None,
                  model: str = "all-MiniLM-L6-v2", threshold: float = 0.85, max_pairs: int = 5000) -> None:
+        if embed_fn is None and importlib.util.find_spec("sentence_transformers") is None:
+            raise ImportError(_NEEDS_ST)  # fail before any run, not after them all; the import itself stays lazy
         self.embed_fn = embed_fn
         self.model = model
         self.threshold = threshold
@@ -174,8 +181,7 @@ class EmbeddingSimilarity:
             try:
                 from sentence_transformers import SentenceTransformer
             except ImportError as exc:
-                raise ImportError("EmbeddingSimilarity needs sentence-transformers: "
-                                  "pip install 'swarmeval[embeddings]', or pass embed_fn=") from exc
+                raise ImportError(_NEEDS_ST) from exc
             st = SentenceTransformer(self.model)
             self.embed_fn = lambda texts: [[float(x) for x in v] for v in st.encode(list(texts))]
         return self.embed_fn
