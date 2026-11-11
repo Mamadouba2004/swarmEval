@@ -15,7 +15,7 @@ import sys
 from typing import Any, Callable, List, Optional
 
 from . import __version__
-from .evaluate import EvaluationResult, analyze_runs, evaluate, load_runset
+from .evaluate import AnalysisFailed, EvaluationResult, analyze_runs, evaluate, load_runset
 from .export import export_events
 from .export.jsonl import write_events_jsonl
 from .pricing import PricingTable
@@ -56,9 +56,21 @@ def _write_outputs(result: EvaluationResult, out: Optional[str]) -> None:
     print(f"\nwrote {out}/{result.label}.json and {out}/{result.label}.events.jsonl")
 
 
+def _write_plain_evaluation(exc: AnalysisFailed, out: Optional[str]) -> int:
+    print(exc.result.report())
+    _write_outputs(exc.result, out)
+    cause = exc.__cause__
+    print(f"swarmeval: coordination analysis failed: {type(cause).__name__}: {cause}; plain evaluation written",
+          file=sys.stderr)
+    return 1
+
+
 def cmd_demo(args: argparse.Namespace) -> int:
     from .examples.research_swarm import build_benchmark, make_swarm
-    result = evaluate(make_swarm, build_benchmark(), trials=args.trials, clock_factory=SimClock, progress=True)
+    try:
+        result = evaluate(make_swarm, build_benchmark(), trials=args.trials, clock_factory=SimClock, progress=True)
+    except AnalysisFailed as exc:
+        return _write_plain_evaluation(exc, args.out)
     print(result.report())
     if args.trace:
         print()
@@ -71,8 +83,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     swarm = _load_obj(args.swarm)
     bench = _load_benchmark(args.benchmark)
     pricing = PricingTable.load(args.pricing) if args.pricing else None
-    result = evaluate(swarm, bench, trials=args.trials, seed=args.seed, clock_factory=_clock_factory(args.clock),
-                      label=args.label, progress=True, pricing=pricing, capture_text=not args.no_capture_text)
+    try:
+        result = evaluate(swarm, bench, trials=args.trials, seed=args.seed, clock_factory=_clock_factory(args.clock),
+                          label=args.label, progress=True, pricing=pricing, capture_text=not args.no_capture_text)
+    except AnalysisFailed as exc:
+        return _write_plain_evaluation(exc, args.out)
     print(result.report())
     _write_outputs(result, args.out)
     return 0
