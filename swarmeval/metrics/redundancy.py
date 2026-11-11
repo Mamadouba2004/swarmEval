@@ -49,7 +49,7 @@ from typing import Any
 from ..graph.builder import ExecutionGraph
 from ..schema import Event, EventType, Status, Trajectory, canonical_args, content_hash, to_text
 from ..similarity import resolve_similarity, similar_pairs
-from ..stats import Summary, known_summary, summarize
+from ..stats import Summary, known_summary, summarize, summary_dict
 
 VERIFICATION_ROLES = frozenset({"critic", "verifier", "reviewer", "validator", "judge"})
 DUPLICATE_CLASSES = ("accidental", "verification", "retry")
@@ -270,7 +270,7 @@ class RedundancySummary:
 
     def to_dict(self) -> dict[str, Any]:
         """The summary as a JSON-ready dict."""
-        return {k: (v.to_dict() if isinstance(v, Summary) else v) for k, v in self.__dict__.items()}
+        return summary_dict(self)
 
 
 def summarize_redundancy(per_run: Sequence[RedundancyMetrics]) -> RedundancySummary:

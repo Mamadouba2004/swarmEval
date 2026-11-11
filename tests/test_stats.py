@@ -17,3 +17,15 @@ def test_summary():
     assert "±" in s.fmt("s")
     assert stats.summarize([]).n == 0
     assert stats.summarize([0.5]).fmt(pct=True) == "50.0%"
+
+
+def test_summary_dict_serializes_nested_summaries():
+    class Holder:
+        def __init__(self):
+            self.n_runs = 2
+            self.tokens = stats.summarize([1.0, 3.0])
+            self.ratio = None
+            self.agents = ["a"]
+
+    assert stats.summary_dict(Holder()) == {"n_runs": 2, "tokens": stats.summarize([1.0, 3.0]).to_dict(),
+                                            "ratio": None, "agents": ["a"]}

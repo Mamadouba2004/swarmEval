@@ -49,7 +49,7 @@ from .recorder import Clock
 from .runner import RunInterrupted, RunOptions, RunSet, SwarmRunner
 from .schema import Benchmark, Trajectory
 from .similarity import resolve_similarity
-from .stats import Summary, mean, summarize
+from .stats import Summary, mean, summarize, summary_dict
 
 
 @dataclass
@@ -76,7 +76,7 @@ class EfficiencySummary:
 
     def to_dict(self) -> dict[str, Any]:
         """The summary as a JSON-ready dict."""
-        return {k: (v.to_dict() if isinstance(v, Summary) else v) for k, v in self.__dict__.items()}
+        return summary_dict(self)
 
 
 def summarize_efficiency(trajectories: Sequence[Trajectory], effs: Sequence[EfficiencyMetrics]) -> EfficiencySummary:

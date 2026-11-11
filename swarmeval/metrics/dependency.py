@@ -46,7 +46,7 @@ from typing import Any
 
 from ..graph.builder import EPS, ExecutionGraph, build_graph
 from ..schema import MessageKind, Trajectory
-from ..stats import Summary, known_summary, summarize
+from ..stats import Summary, known_summary, summarize, summary_dict
 from .efficiency import EfficiencyMetrics, union_length
 
 _CALL_KINDS = ("llm", "tool")
@@ -290,7 +290,7 @@ class DependencySummary:
 
     def to_dict(self) -> dict[str, Any]:
         """The summary as a JSON-ready dict."""
-        return {k: (v.to_dict() if isinstance(v, Summary) else v) for k, v in self.__dict__.items()}
+        return summary_dict(self)
 
 
 

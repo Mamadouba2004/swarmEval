@@ -39,7 +39,7 @@ from typing import Any
 
 from ..graph.builder import EPS
 from ..schema import Event, EventType, Trajectory, estimate_tokens
-from ..stats import Summary, summarize
+from ..stats import Summary, summarize, summary_dict
 from .communication import body_tokens
 
 
@@ -157,7 +157,7 @@ class ContextSummary:
 
     def to_dict(self) -> dict[str, Any]:
         """The summary as a JSON-ready dict."""
-        return {k: (v.to_dict() if isinstance(v, Summary) else v) for k, v in self.__dict__.items()}
+        return summary_dict(self)
 
 
 def summarize_context(per_run: Sequence[ContextMetrics]) -> ContextSummary:

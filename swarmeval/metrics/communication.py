@@ -43,7 +43,7 @@ from typing import Any
 
 from ..graph.builder import ExecutionGraph, build_graph
 from ..schema import EventType, MessageKind, Trajectory
-from ..stats import Summary, known_summary, mean, summarize
+from ..stats import Summary, known_summary, mean, summarize, summary_dict
 
 CATEGORIES: dict[str, str] = {
     MessageKind.TASK_ASSIGNMENT.value: "coordination",
@@ -204,7 +204,7 @@ class CommunicationSummary:
 
     def to_dict(self) -> dict[str, Any]:
         """The summary as a JSON-ready dict."""
-        return {k: (v.to_dict() if isinstance(v, Summary) else v) for k, v in self.__dict__.items()}
+        return summary_dict(self)
 
 
 def summarize_communication(per_run: Sequence[CommunicationMetrics]) -> CommunicationSummary:

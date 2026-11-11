@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 
 def mean(xs: Sequence[float]) -> float:
@@ -65,3 +66,8 @@ def known_summary(values: Sequence[float | None]) -> Summary | None:
     """Summary of the defined values, None when there are none."""
     known = [v for v in values if v is not None]
     return summarize(known) if known else None
+
+
+def summary_dict(obj: Any) -> dict[str, Any]:
+    """The attributes of ``obj`` as a dict, with each Summary turned into its dict."""
+    return {k: (v.to_dict() if isinstance(v, Summary) else v) for k, v in obj.__dict__.items()}
