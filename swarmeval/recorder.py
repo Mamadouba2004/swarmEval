@@ -39,6 +39,8 @@ Classes:
 - LLMResult: Return this from a function passed to ``AgentSpan.llm`` to report real token usage.
 - LLMCall: Mutable handle yielded by ``AgentSpan.llm_call``.
 - ToolCall: Mutable handle yielded by ``AgentSpan.tool_call``.
+- _ExceptionTracker: Which event first recorded each exception, so a re-recorded (or wrapping) one is marked
+  ``propagated``. Has its own lock.
 - RunContext: Everything a swarm needs during one run: recording, messaging, seeded randomness and the clock.
 - AgentSpan: Context manager (sync or async) for one agent invocation.
 """
@@ -272,6 +274,40 @@ def _takes_positional(fn: Callable[..., Any]) -> bool:
     return any(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL) for p in params)
 
 
+class _ExceptionTracker:
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._origin: dict[int, tuple[BaseException, str]] = {}
+
+    def mark(self, exc: BaseException, event_id: str) -> None:
+        """Remember the first event that recorded ``exc``."""
+        with self._lock:
+            self._origin.setdefault(id(exc), (exc, event_id))
+
+    def origin_of(self, exc: BaseException) -> tuple[BaseException, str] | None:
+        """The first recorded event for ``exc`` or for an exception it wraps
+        (``raise X from e`` / an exception raised while handling ``e``)."""
+        seen: set = set()
+        e: BaseException | None = exc
+        with self._lock:
+            while e is not None and id(e) not in seen:
+                seen.add(id(e))
+                origin = self._origin.get(id(e))
+                if origin is not None and origin[0] is e:
+                    return origin
+                e = e.__cause__ or (None if e.__suppress_context__ else e.__context__)
+        return None
+
+    def propagation_meta(self, exc: BaseException) -> dict[str, Any]:
+        """Metadata for an event recording ``exc`` again: empty the first time, else ``propagated`` and a
+        pointer to the original event, so one failure is counted once."""
+        origin = self.origin_of(exc)
+        if origin is None:
+            return {}
+        return {"propagated": True, "origin_event_id": origin[1]}
+
+
 class RunContext:
 
     def __init__(self, task: Task, run_id: str | None = None, clock: Clock | None = None,
@@ -291,7 +327,7 @@ class RunContext:
         self.trajectory.metadata["schema_version"] = SCHEMA_VERSION
         self._lock = threading.RLock()
         self._mailbox: dict[str, list[Message]] = {}
-        self._error_origin: dict[int, tuple[BaseException, str]] = {}
+        self._errors = _ExceptionTracker()
         self._started = False
         self._finished = False
 
@@ -362,43 +398,16 @@ class RunContext:
         """Apply the run's text policy to a value before recording it."""
         return self.text_policy.apply(obj)
 
-    def _mark_exception(self, exc: BaseException, event_id: str) -> None:
-        """Remember the first event that recorded ``exc``."""
-        with self._lock:
-            self._error_origin.setdefault(id(exc), (exc, event_id))
-
-    def _origin_of(self, exc: BaseException) -> tuple[BaseException, str] | None:
-        """The first recorded event for ``exc`` or for an exception it wraps
-        (``raise X from e`` / an exception raised while handling ``e``)."""
-        seen: set = set()
-        e: BaseException | None = exc
-        with self._lock:
-            while e is not None and id(e) not in seen:
-                seen.add(id(e))
-                origin = self._error_origin.get(id(e))
-                if origin is not None and origin[0] is e:
-                    return origin
-                e = e.__cause__ or (None if e.__suppress_context__ else e.__context__)
-        return None
-
-    def _propagation_meta(self, exc: BaseException) -> dict[str, Any]:
-        """Metadata for an event recording ``exc`` again: empty the first time, else ``propagated`` and a
-        pointer to the original event, so one failure is counted once."""
-        origin = self._origin_of(exc)
-        if origin is None:
-            return {}
-        return {"propagated": True, "origin_event_id": origin[1]}
-
     def record_exception(self, exc: BaseException, _span: AgentSpan | None = None) -> Event:
         """Record an ERROR for ``exc``; later records of the same (or a wrapping) exception are marked
         ``propagated`` and point to the first, so one failure counts once at any nesting depth."""
         err = f"{type(exc).__name__}: {exc}"
         tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))[-2000:]
-        meta = self._propagation_meta(exc)
+        meta = self._errors.propagation_meta(exc)
         ev = self.record(EventType.ERROR, _span=_span, error=err,
                          content=self._text(tb) if self.capture_text else None, metadata=meta)
         if not meta:
-            self._mark_exception(exc, ev.event_id)
+            self._errors.mark(exc, ev.event_id)
         return ev
 
     def agent(self, agent_id: str, role: str | None = None, model: str | None = None,
@@ -608,9 +617,9 @@ class AgentSpan:
         try:
             yield call
         except Exception as exc:
-            call.metadata.update(ctx._propagation_meta(exc))
+            call.metadata.update(ctx._errors.propagation_meta(exc))
             ev = self._record_llm(call, t0, Status.ERROR.value, f"{type(exc).__name__}: {exc}")
-            ctx._mark_exception(exc, ev.event_id)
+            ctx._errors.mark(exc, ev.event_id)
             raise
         finally:
             _current_call.reset(call_token)
@@ -710,9 +719,9 @@ class AgentSpan:
         try:
             yield call
         except Exception as exc:
-            call.metadata.update(ctx._propagation_meta(exc))
+            call.metadata.update(ctx._errors.propagation_meta(exc))
             ev = self._record_tool(call, t0, Status.ERROR.value, f"{type(exc).__name__}: {exc}")
-            ctx._mark_exception(exc, ev.event_id)
+            ctx._errors.mark(exc, ev.event_id)
             raise
         finally:
             _current_call.reset(call_token)

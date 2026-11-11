@@ -188,3 +188,17 @@ def test_text_capture_can_be_disabled():
         a.produce("big", "x" * 5000)
     ev = ctx.finish().events_of(EventType.ARTIFACT)[0]
     assert len(ev.content) < 200
+
+
+def test_exception_tracker_follows_cause_chain():
+    from swarmeval.recorder import _ExceptionTracker
+    errors = _ExceptionTracker()
+    e = ValueError("inner")
+    errors.mark(e, "ev_x")
+    try:
+        raise RuntimeError("outer") from e
+    except RuntimeError as x:
+        wrapped = x
+    assert errors.origin_of(wrapped) == (e, "ev_x")
+    assert errors.propagation_meta(wrapped) == {"propagated": True, "origin_event_id": "ev_x"}
+    assert errors.propagation_meta(KeyError("unrelated")) == {}
