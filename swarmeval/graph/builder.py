@@ -448,6 +448,163 @@ class _Builder:
             finish(p, x)
         return entry, frontier()
 
+    def artifact_edges(self) -> None:
+        """Rule 5: index genuine artifact consumption and link each producer to its consumers."""
+        self.consumptions: list[tuple[str, str | None, float, WorkUnit]] = []
+        for u in self.units:
+            if u.kind in ("use", "llm", "tool", "produce"):
+                node = self.top(u)
+                for a in self.ev[u.event_id].input_artifacts:
+                    self.consumptions.append((a, u.agent_id, u.start, node))
+        self.produce_node: dict[str, WorkUnit] = {}
+        for u in self.units:
+            if u.kind == "produce":
+                for a in self.ev[u.event_id].output_artifacts:
+                    self.produce_node.setdefault(a, u)
+        self.artifact_consumers: dict[str, list[str]] = {}
+        for a, agent, _, node in self.consumptions:
+            if agent is not None and agent not in self.artifact_consumers.setdefault(a, []):
+                self.artifact_consumers[a].append(agent)
+            p = self.produce_node.get(a)
+            if p is not None and p.node_id != node.node_id:
+                self.add_edge(p, node, "artifact", ref=a)
+
+    def message_links(self) -> None:
+        """Rule 4: link each send to its receive, or to the receiver's next unit when none was recorded,
+        and record whether the message was used."""
+        self.by_agent: dict[str, list[WorkUnit]] = defaultdict(list)
+        for u in self.dag:
+            if u.agent_id is not None:
+                self.by_agent[u.agent_id].append(u)
+        starts = {a: [x.start for x in us] for a, us in self.by_agent.items()}
+        receive_of: dict[str, WorkUnit] = {}
+        self.send_of: dict[str, WorkUnit] = {}
+        for u in self.units:
+            mid = self.ev[u.event_id].message_id
+            if mid and u.kind == "receive":
+                receive_of.setdefault(mid, u)
+            elif mid and u.kind == "send":
+                self.send_of.setdefault(mid, u)
+        used_by: dict[tuple[str, str | None], list[float]] = defaultdict(list)
+        for a, agent, t, _ in self.consumptions:
+            used_by[(a, agent)].append(t)
+
+        self.links: list[MessageLink] = []
+        for s in self.units:
+            if s.kind != "send":
+                continue
+            ev = self.ev[s.event_id]
+            rcv = receive_of.get(ev.message_id) if ev.message_id else None
+            target: WorkUnit | None = None
+            if rcv is not None:
+                target = rcv
+                self.add_edge(s, rcv, "message", ref=ev.message_id)
+            else:
+                cands = self.by_agent.get(ev.receiver or "", [])
+                i = bisect_left(starts.get(ev.receiver or "", []), s.start - EPS)
+                for cand in cands[i:]:
+                    if cand.node_id != s.node_id and self.key(s) < self.key(cand):
+                        target = cand
+                        break
+                if target is not None:
+                    self.add_edge(s, target, "message", inferred=True, ref=ev.message_id)
+            received = target is not None and target is rcv
+            arts = list(ev.input_artifacts)
+            used, used_inferred = False, False
+            if target is not None:
+                used = any(t >= s.start - EPS for a in arts for t in used_by.get((a, ev.receiver), []))
+                if not used:
+                    t0 = max(target.start, s.start)
+                    used = any(x.kind in _CALL_KINDS and x.start >= t0 - EPS
+                               and not (arts and self.ev[x.event_id].input_artifacts)
+                               for x in self.by_agent.get(ev.receiver or "", []))
+                    used_inferred = used
+            self.links.append(MessageLink(s.node_id, target.node_id if target else None, ev.message_id, ev.sender,
+                                     ev.receiver, ev.kind, ev.content_tokens, arts, received, used,
+                                     used_inferred))
+
+    def wait_edges(self) -> None:
+        """Rule 6: link each wait to the artifacts, messages and agents it waited on."""
+        for w in self.units:
+            if w.kind != "wait":
+                continue
+            ev = self.ev[w.event_id]
+            for a in ev.input_artifacts:
+                if a in self.produce_node:
+                    self.add_edge(self.produce_node[a], w, "wait", ref=a)
+            for mid in ev.metadata.get("on_messages", []) or []:
+                if mid in self.send_of:
+                    self.add_edge(self.send_of[mid], w, "wait", ref=mid)
+            for agent in ev.metadata.get("on_agents", []) or []:
+                if agent == w.agent_id:
+                    continue
+                done = [x for x in self.by_agent.get(agent, []) if x.end <= w.end + EPS and self.key(x) < self.key(w)]
+                if done:
+                    self.add_edge(max(done, key=lambda x: (x.end, self.key(x))), w, "wait", inferred=True, ref=agent)
+
+    def agent_graph(self) -> None:
+        """The agent list and the aggregated agent-level edges."""
+        self.agents = self.traj.agent_ids()
+        extra = set()
+        for ev in self.traj.events:
+            for a in (ev.agent_id, ev.sender, ev.receiver):
+                if a is not None and a not in self.agents:
+                    extra.add(a)
+        self.agents += sorted(extra)
+        rank = {a: i for i, a in enumerate(self.agents)}
+
+        agent_edges: dict[tuple[str, str, str], AgentEdge] = {}
+
+        def edge(src: str, dst: str, kind: str) -> AgentEdge:
+            k = (src, dst, kind)
+            if k not in agent_edges:
+                agent_edges[k] = AgentEdge(src, dst, kind)
+            return agent_edges[k]
+
+        for m in self.links:
+            if m.sender is None or m.receiver is None:
+                continue
+            e = edge(m.sender, m.receiver, "message")
+            e.count += 1
+            e.tokens += m.tokens
+            e.used_count += int(m.used)
+            e.inferred_count += int(m.inferred)
+        for a, consumers in self.artifact_consumers.items():
+            art = self.traj.artifacts.get(a)
+            if art is None or art.producer is None:
+                continue
+            for c in consumers:
+                if c != art.producer:
+                    e = edge(art.producer, c, "artifact")
+                    e.count += 1
+                    e.used_count += 1
+                    e.tokens += art.tokens
+        for s in self.traj.spans.values():
+            parent = self.traj.spans.get(s.parent_span_id or "")
+            if parent is not None and parent.agent_id != s.agent_id:
+                edge(parent.agent_id, s.agent_id, "invocation").count += 1
+        kind_rank = {"invocation": 0, "message": 1, "artifact": 2}
+        self.ordered = sorted(agent_edges.values(), key=lambda e: (kind_rank[e.kind], rank.get(e.source, 0),
+                                                               rank.get(e.target, 0)))
+
+    def coverage(self) -> Coverage:
+        """How much of the provenance was recorded."""
+        instrumented = {a: False for a in self.agents}
+        for u in self.units:
+            ev = self.ev[u.event_id]
+            if u.agent_id is None:
+                continue
+            if u.kind == "use" or (u.kind in _CALL_KINDS and ev.input_artifacts):
+                instrumented[u.agent_id] = True
+        for art in self.traj.artifacts.values():
+            if art.derived_from and art.producer is not None:
+                instrumented[art.producer] = True
+        derived = sum(1 for a in self.traj.artifacts.values() if a.derived_from is not None)
+        cov = Coverage(messages=len(self.links), messages_received=sum(1 for m in self.links if m.received),
+                       artifacts=len(self.traj.artifacts), artifacts_with_derived_from=derived,
+                       consumers_instrumented=instrumented)
+        return cov
+
 
 def _contains(outer: WorkUnit, inner: WorkUnit) -> bool:
     """True if ``inner`` lies within ``outer``; identical intervals count as concurrent, not nested."""
@@ -469,150 +626,10 @@ def build_graph(traj: Trajectory) -> ExecutionGraph:
     b = _Builder(traj)
     b.make_units()
     b.sequence_and_invocation()
-
-    consumptions: list[tuple[str, str | None, float, WorkUnit]] = []
-    for u in b.units:
-        if u.kind in ("use", "llm", "tool", "produce"):
-            node = b.top(u)
-            for a in b.ev[u.event_id].input_artifacts:
-                consumptions.append((a, u.agent_id, u.start, node))
-    produce_node: dict[str, WorkUnit] = {}
-    for u in b.units:
-        if u.kind == "produce":
-            for a in b.ev[u.event_id].output_artifacts:
-                produce_node.setdefault(a, u)
-    artifact_consumers: dict[str, list[str]] = {}
-    for a, agent, _, node in consumptions:
-        if agent is not None and agent not in artifact_consumers.setdefault(a, []):
-            artifact_consumers[a].append(agent)
-        p = produce_node.get(a)
-        if p is not None and p.node_id != node.node_id:
-            b.add_edge(p, node, "artifact", ref=a)
-
-    by_agent: dict[str, list[WorkUnit]] = defaultdict(list)
-    for u in b.dag:
-        if u.agent_id is not None:
-            by_agent[u.agent_id].append(u)
-    starts = {a: [x.start for x in us] for a, us in by_agent.items()}
-    receive_of: dict[str, WorkUnit] = {}
-    send_of: dict[str, WorkUnit] = {}
-    for u in b.units:
-        mid = b.ev[u.event_id].message_id
-        if mid and u.kind == "receive":
-            receive_of.setdefault(mid, u)
-        elif mid and u.kind == "send":
-            send_of.setdefault(mid, u)
-    used_by: dict[tuple[str, str | None], list[float]] = defaultdict(list)
-    for a, agent, t, _ in consumptions:
-        used_by[(a, agent)].append(t)
-
-    links: list[MessageLink] = []
-    for s in b.units:
-        if s.kind != "send":
-            continue
-        ev = b.ev[s.event_id]
-        rcv = receive_of.get(ev.message_id) if ev.message_id else None
-        target: WorkUnit | None = None
-        if rcv is not None:
-            target = rcv
-            b.add_edge(s, rcv, "message", ref=ev.message_id)
-        else:
-            cands = by_agent.get(ev.receiver or "", [])
-            i = bisect_left(starts.get(ev.receiver or "", []), s.start - EPS)
-            for cand in cands[i:]:
-                if cand.node_id != s.node_id and b.key(s) < b.key(cand):
-                    target = cand
-                    break
-            if target is not None:
-                b.add_edge(s, target, "message", inferred=True, ref=ev.message_id)
-        received = target is not None and target is rcv
-        arts = list(ev.input_artifacts)
-        used, used_inferred = False, False
-        if target is not None:
-            used = any(t >= s.start - EPS for a in arts for t in used_by.get((a, ev.receiver), []))
-            if not used:
-                t0 = max(target.start, s.start)
-                used = any(x.kind in _CALL_KINDS and x.start >= t0 - EPS
-                           and not (arts and b.ev[x.event_id].input_artifacts)
-                           for x in by_agent.get(ev.receiver or "", []))
-                used_inferred = used
-        links.append(MessageLink(s.node_id, target.node_id if target else None, ev.message_id, ev.sender,
-                                 ev.receiver, ev.kind, ev.content_tokens, arts, received, used,
-                                 used_inferred))
-
-    for w in b.units:
-        if w.kind != "wait":
-            continue
-        ev = b.ev[w.event_id]
-        for a in ev.input_artifacts:
-            if a in produce_node:
-                b.add_edge(produce_node[a], w, "wait", ref=a)
-        for mid in ev.metadata.get("on_messages", []) or []:
-            if mid in send_of:
-                b.add_edge(send_of[mid], w, "wait", ref=mid)
-        for agent in ev.metadata.get("on_agents", []) or []:
-            if agent == w.agent_id:
-                continue
-            done = [x for x in by_agent.get(agent, []) if x.end <= w.end + EPS and b.key(x) < b.key(w)]
-            if done:
-                b.add_edge(max(done, key=lambda x: (x.end, b.key(x))), w, "wait", inferred=True, ref=agent)
-
-    agents = traj.agent_ids()
-    extra = set()
-    for ev in traj.events:
-        for a in (ev.agent_id, ev.sender, ev.receiver):
-            if a is not None and a not in agents:
-                extra.add(a)
-    agents += sorted(extra)
-    rank = {a: i for i, a in enumerate(agents)}
-
-    agent_edges: dict[tuple[str, str, str], AgentEdge] = {}
-
-    def edge(src: str, dst: str, kind: str) -> AgentEdge:
-        k = (src, dst, kind)
-        if k not in agent_edges:
-            agent_edges[k] = AgentEdge(src, dst, kind)
-        return agent_edges[k]
-
-    for m in links:
-        if m.sender is None or m.receiver is None:
-            continue
-        e = edge(m.sender, m.receiver, "message")
-        e.count += 1
-        e.tokens += m.tokens
-        e.used_count += int(m.used)
-        e.inferred_count += int(m.inferred)
-    for a, consumers in artifact_consumers.items():
-        art = traj.artifacts.get(a)
-        if art is None or art.producer is None:
-            continue
-        for c in consumers:
-            if c != art.producer:
-                e = edge(art.producer, c, "artifact")
-                e.count += 1
-                e.used_count += 1
-                e.tokens += art.tokens
-    for s in traj.spans.values():
-        parent = traj.spans.get(s.parent_span_id or "")
-        if parent is not None and parent.agent_id != s.agent_id:
-            edge(parent.agent_id, s.agent_id, "invocation").count += 1
-    kind_rank = {"invocation": 0, "message": 1, "artifact": 2}
-    ordered = sorted(agent_edges.values(), key=lambda e: (kind_rank[e.kind], rank.get(e.source, 0),
-                                                           rank.get(e.target, 0)))
-
-    instrumented = {a: False for a in agents}
-    for u in b.units:
-        ev = b.ev[u.event_id]
-        if u.agent_id is None:
-            continue
-        if u.kind == "use" or (u.kind in _CALL_KINDS and ev.input_artifacts):
-            instrumented[u.agent_id] = True
-    for art in traj.artifacts.values():
-        if art.derived_from and art.producer is not None:
-            instrumented[art.producer] = True
-    derived = sum(1 for a in traj.artifacts.values() if a.derived_from is not None)
-    cov = Coverage(messages=len(links), messages_received=sum(1 for m in links if m.received),
-                   artifacts=len(traj.artifacts), artifacts_with_derived_from=derived,
-                   consumers_instrumented=instrumented)
-    return ExecutionGraph(traj.run_id, agents, ordered, b.units, b.edges, cov, links, artifact_consumers,
+    b.artifact_edges()
+    b.message_links()
+    b.wait_edges()
+    b.agent_graph()
+    cov = b.coverage()
+    return ExecutionGraph(traj.run_id, b.agents, b.ordered, b.units, b.edges, cov, b.links, b.artifact_consumers,
                           schema_version=b.version, dropped_edges=b.dropped)
