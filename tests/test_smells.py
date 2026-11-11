@@ -688,6 +688,14 @@ def test_flat_config_key_error_names_new_location(tmp_path):
     assert OLD_FLAT_KEYS == {old: new for old, (new, _) in OLD_FLAT_DEFAULTS.items()}
 
 
+def test_detector_config_classes_are_exported():
+    import swarmeval.diagnostics as D
+    from swarmeval.diagnostics import smells as S
+    for name, cls in S._CONFIG_CLASSES.items():
+        assert getattr(D, cls.__name__, None) is cls and cls.__name__ in D.__all__, name
+    assert len(S._CONFIG_CLASSES) == 9
+
+
 def test_late_and_premature_registers_two_smells(smell_registry):
     S = smell_registry
     assert list(S._REGISTRY) == ["redundant_delegation", "agent_ping_pong", "over_agentization",
