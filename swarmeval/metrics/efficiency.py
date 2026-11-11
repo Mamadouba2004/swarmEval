@@ -107,17 +107,25 @@ def event_cost(ev, pricing: PricingTable | None) -> float | None:
     return pricing.cost(ev.model, ev.input_tokens, ev.output_tokens, ev.cache_read_tokens, ev.cache_write_tokens)
 
 
-def compute_efficiency(traj: Trajectory, pricing: PricingTable | None = None) -> EfficiencyMetrics:
-    """Efficiency of one run; ``cost_usd`` is ``None`` when no call could be priced, never a silent zero,
-    and ``cost_complete`` is False when any call is unpriced."""
-    m = EfficiencyMetrics()
-    per: dict[str, AgentEfficiency] = {}
+def _agent(per: dict[str, AgentEfficiency], aid: str) -> AgentEfficiency:
+    """The record of agent ``aid``, created on first use."""
+    if aid not in per:
+        per[aid] = AgentEfficiency(aid)
+    return per[aid]
 
-    def agent(aid: str) -> AgentEfficiency:
-        if aid not in per:
-            per[aid] = AgentEfficiency(aid)
-        return per[aid]
 
+def _count_call_error(ev, m: EfficiencyMetrics, per: dict[str, AgentEfficiency]) -> None:
+    """Count a failed LLM or tool call, unless it is an already-counted exception passing through."""
+    if ev.status == "error" and not ev.metadata.get("propagated"):
+        m.errors += 1
+        if ev.agent_id:
+            _agent(per, ev.agent_id).errors += 1
+
+
+def _tally_events(traj: Trajectory, pricing: PricingTable | None, m: EfficiencyMetrics,
+                  per: dict[str, AgentEfficiency]) -> dict[str, list[tuple[float, float]]]:
+    """Add every event's tokens, calls, cost, messages and errors to ``m`` and ``per``; return each span's call
+    intervals."""
     busy: dict[str, list[tuple[float, float]]] = defaultdict(list)
     for ev in traj.events:
         if ev.event_type == EventType.LLM_CALL.value:
@@ -140,7 +148,7 @@ def compute_efficiency(traj: Trajectory, pricing: PricingTable | None = None) ->
             if ev.span_id:
                 busy[ev.span_id].append((ev.timestamp, ev.end_timestamp))
             if ev.agent_id:
-                a = agent(ev.agent_id)
+                a = _agent(per, ev.agent_id)
                 a.llm_calls += 1
                 a.input_tokens += ev.prompt_tokens
                 a.output_tokens += ev.output_tokens
@@ -148,36 +156,35 @@ def compute_efficiency(traj: Trajectory, pricing: PricingTable | None = None) ->
                     a.cost_complete = False
                 else:
                     a.cost_usd = (a.cost_usd or 0.0) + cost
-            if ev.status == "error" and not ev.metadata.get("propagated"):
-                m.errors += 1
-                if ev.agent_id:
-                    agent(ev.agent_id).errors += 1
+            _count_call_error(ev, m, per)
         elif ev.event_type == EventType.TOOL_CALL.value:
             m.tool_calls += 1
             m.tool_latency_s += ev.duration_s
             if ev.span_id:
                 busy[ev.span_id].append((ev.timestamp, ev.end_timestamp))
             if ev.agent_id:
-                agent(ev.agent_id).tool_calls += 1
-            if ev.status == "error" and not ev.metadata.get("propagated"):
-                m.errors += 1
-                if ev.agent_id:
-                    agent(ev.agent_id).errors += 1
+                _agent(per, ev.agent_id).tool_calls += 1
+            _count_call_error(ev, m, per)
         elif ev.event_type == EventType.MESSAGE.value:
             m.messages += 1
             m.message_tokens += ev.content_tokens
             if ev.sender:
-                agent(ev.sender).messages_sent += 1
+                _agent(per, ev.sender).messages_sent += 1
         elif ev.event_type == EventType.ARTIFACT.value and ev.agent_id:
-            agent(ev.agent_id).artifacts_produced += 1
+            _agent(per, ev.agent_id).artifacts_produced += 1
         elif ev.event_type == EventType.ERROR.value and not ev.metadata.get("propagated"):
             m.errors += 1
             if ev.agent_id and ev.span_id:
-                agent(ev.agent_id).errors += 1
+                _agent(per, ev.agent_id).errors += 1
     m.total_tokens = m.input_tokens + m.output_tokens
     if m.llm_calls == 0:
         m.cost_usd = 0.0
+    return busy
 
+
+def _span_timing(traj: Trajectory, per: dict[str, AgentEfficiency],
+                 busy: dict[str, list[tuple[float, float]]]) -> None:
+    """Add each finished span's self, busy and idle time to its agent."""
     children: dict[str, list[tuple[float, float]]] = defaultdict(list)
     for s in traj.spans.values():
         if s.parent_span_id and s.end is not None:
@@ -185,7 +192,7 @@ def compute_efficiency(traj: Trajectory, pricing: PricingTable | None = None) ->
     for s in traj.spans.values():
         if s.end is None:
             continue
-        a = agent(s.agent_id)
+        a = _agent(per, s.agent_id)
         a.spans += 1
         a.role = a.role or s.role
         child_time = union_length([(max(s.start, c0), min(s.end, c1)) for c0, c1 in children.get(s.span_id, [])])
@@ -194,9 +201,23 @@ def compute_efficiency(traj: Trajectory, pricing: PricingTable | None = None) ->
         a.self_time_s += self_time
         a.busy_time_s += busy_time
         a.idle_time_s += max(0.0, self_time - busy_time)
+
+
+def _order_agents(traj: Trajectory, per: dict[str, AgentEfficiency]) -> dict[str, AgentEfficiency]:
+    """The agent records ordered by first span start, then id."""
     first = {aid: min((s.start for s in traj.spans.values() if s.agent_id == aid), default=float("inf"))
              for aid in per}
-    m.per_agent = {aid: per[aid] for aid in sorted(per, key=lambda a: (first[a], a))}
+    return {aid: per[aid] for aid in sorted(per, key=lambda a: (first[a], a))}
+
+
+def compute_efficiency(traj: Trajectory, pricing: PricingTable | None = None) -> EfficiencyMetrics:
+    """Efficiency of one run; ``cost_usd`` is ``None`` when no call could be priced, never a silent zero,
+    and ``cost_complete`` is False when any call is unpriced."""
+    m = EfficiencyMetrics()
+    per: dict[str, AgentEfficiency] = {}
+    busy = _tally_events(traj, pricing, m, per)
+    _span_timing(traj, per, busy)
+    m.per_agent = _order_agents(traj, per)
     m.agent_time_s = sum(a.self_time_s for a in per.values())
     m.waiting_time_s = sum(a.idle_time_s for a in per.values())
     m.wall_clock_s = traj.duration
