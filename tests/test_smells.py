@@ -616,6 +616,19 @@ def test_detector_receives_only_its_section(demo, smell_registry):
     assert not hasattr(ctx, "cfg")
 
 
+def test_smell_config_rejects_unknown_or_mistyped_sections(demo):
+    from swarmeval.diagnostics.smells import ContextBloatConfig
+    with pytest.raises(ValueError, match=r"unknown smell config section\(s\) \['bloat_ratio'\]; known: .*bloat"):
+        SmellConfig(bloat_ratio=1000.0)
+    with pytest.raises(ValueError, match=r"\['bloat'\]; known: "):
+        SmellConfig(bloat=ContextBloatConfig())
+    with pytest.raises(TypeError, match="context_bloat.*ContextBloatConfig.*dict"):
+        SmellConfig(context_bloat={"ratio": 2.0})
+    cfg = SmellConfig(context_bloat=ContextBloatConfig(ratio=1000.0))
+    out = detect_smells(demo.runs.trajectories[0], demo.per_run_coordination[0], cfg)
+    assert "context_bloat" not in {d.smell for d in out}
+
+
 def test_late_and_premature_registers_two_smells(smell_registry):
     S = smell_registry
     assert list(S._REGISTRY) == ["redundant_delegation", "agent_ping_pong", "over_agentization",

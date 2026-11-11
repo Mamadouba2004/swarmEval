@@ -152,8 +152,20 @@ class CommunicationOverheadConfig:
     min_messages: int = 3
 
 
+def _reject_unknown_sections(names: Iterable[str]) -> None:
+    """Raise ValueError naming any section that no registered detector configures."""
+    unknown = sorted(k for k in names if k not in _CONFIG_CLASSES)
+    if unknown:
+        raise ValueError(f"unknown smell config section(s) {unknown}; known: {sorted(_CONFIG_CLASSES)}")
+
+
 class SmellConfig(dict[str, Any]):
     def __init__(self, **sections: Any) -> None:
+        _reject_unknown_sections(sections)
+        for name, section in sections.items():
+            if not isinstance(section, _CONFIG_CLASSES[name]):
+                raise TypeError(f"smell config section {name!r}: expected {_CONFIG_CLASSES[name].__name__}, "
+                                f"got {type(section).__name__}")
         super().__init__({name: cls() for name, cls in _CONFIG_CLASSES.items()})
         self.update(sections)
 
@@ -164,9 +176,7 @@ class SmellConfig(dict[str, Any]):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SmellConfig:
         """Defaults overridden by nested ``{section: {field: value}}``, rejecting unknown sections and fields."""
-        unknown = sorted(k for k in d if k not in _CONFIG_CLASSES)
-        if unknown:
-            raise ValueError(f"unknown smell config section(s) {unknown}; known: {sorted(_CONFIG_CLASSES)}")
+        _reject_unknown_sections(d)
         cfg = cls()
         for name, overrides in d.items():
             if not isinstance(overrides, dict):
