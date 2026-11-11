@@ -67,6 +67,20 @@ The core analytical layer: did multiple agents actually produce useful coordinat
 * **Parallelism** (`metrics/dependency.py`) — actual = work ÷ wall, potential = work ÷ critical path, headroom = wall − critical path; *unrecorded* time (wall minus the union of call and wait intervals) is reported separately so idle time is not read as headroom. The gap is an optimization opportunity, subject to rate limits and deliberate synchronisation.
 * **Context bloat** (`metrics/context.py`) — per LLM call, prompt tokens vs tokens traceable to recorded inputs (task + used artifacts + received message bodies + earlier outputs of the span + `system_tokens`). Untracked inputs show up as excess, so the ratio reads "untraceable", not "useless".
 
+Dependency, communication, redundancy and context are entries in a registry, `metrics.coordination.ANALYSES`. Each entry is a `CoordinationAnalysis(name, compute, summarize, metrics, rows, group)`:
+* `compute` takes an `AnalysisInput(traj, graph, efficiency, similarity)`.
+* `metrics` are the `compare` rows.
+* `rows` are the report rows; `group` puts entries in one block of the coordination box.
+
+`compute_coordination`, `summarize_coordination` and `analyze_runs` take `analyses=` (default `ANALYSES`).
+* A new family is one module plus one entry in `ANALYSES`. The text and HTML coordination rows and the `compare` metrics follow `ANALYSES` order.
+* An entry passed only through `analyses=` reaches the JSON under `extra` (`cm.get(name)`), but not the report rows or `compare`.
+* Coverage, utilization, observed contribution and smells stay fixed. Smells run last because they read the whole `CoordinationMetrics`. Efficiency is computed first and passed in, because utilization and dependency use it.
+
+Other extension points:
+* Swarms are typed against `runner.SwarmContext`, the six members swarm code uses: `agent`, `parallel`, `gather`, `set_output`, `rng`, `clock`. Runner-only methods such as `start`, `finish` and `record_exception` stay off it.
+* Saved results reload through `evaluate.load_result(path, pricing=None, **analysis options)`.
+
 ### Layer 4 — Robustness & causality (`causal/`)
 Agent, tool and architecture ablation; failure injection (crash, delay, dropped/corrupted messages, malformed tool output, tool errors, LLM errors, budgets); resilience = success under failure ÷ normal success; quality retention, recovery cost and latency.
 
@@ -99,6 +113,11 @@ ESLint for agent architectures. Each smell is a *hypothesis from trajectory evid
 | Communication overhead | message tokens are a large share of LLM tokens |
 
 Cross-run aggregation (`diagnostics/engine.py`) reports prevalence: each run counts once per smell, agents once per run, grouped by smell, sorted by severity then prevalence. Thresholds (`SmellConfig`, JSON-overridable) are initial guesses; they are to be validated against Phase 3 ablations (does removing the flagged agent / capping the flagged exchange change success and cost as the hypothesis predicts?). Evidence that rests on timing-inferred edges is marked `inferred` and its severity capped. Wording is checked by a test: no causal claims, no "contributed N%".
+
+Detectors are registered, not hard-coded. `register_smell(name, detector, smells=None)` runs `detector(ctx)` with a `SmellContext` and adds the smells it emits to `SMELLS`, which sets the output order.
+* Registering a name again replaces its detector and its smells.
+* Claiming a smell that another registration already emits is a ValueError.
+* Custom smells are Python API only; there is no CLI plugin loading.
 
 ## 6. Counterfactual evaluation (`causal/`)
 
