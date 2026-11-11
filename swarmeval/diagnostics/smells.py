@@ -697,6 +697,10 @@ def detect_smells(traj: Trajectory, metrics: CoordinationMetrics,
     c = SmellContext(traj, metrics)
     for name, detect in _REGISTRY.items():
         cls = _CONFIG_CLASSES.get(name)
-        detect(c, cfg[name] if name in cfg else cls() if cls is not None else None)
+        section = cfg[name] if name in cfg else cls() if cls is not None else None
+        if section is not None and (cls is None or not isinstance(section, cls)):
+            raise TypeError(f"smell config section {name!r} is a {type(section).__name__}, but {name!r} is now "
+                            f"registered with {cls.__name__ if cls else 'no config_cls'}; rebuild the SmellConfig")
+        detect(c, section)
     order = {s: i for i, s in enumerate(SMELLS)}
     return sorted(c.out, key=lambda d: (order.get(d.smell, len(order)), -SEVERITY_RANK[d.severity]))

@@ -647,6 +647,32 @@ def test_register_smell_rejects_config_cls_without_defaults(demo, smell_registry
     assert [d.to_dict() for d in detect_smells(traj, cm, SmellConfig())] == [d.to_dict() for d in cm.diagnostics]
 
 
+def test_detect_smells_rejects_stale_section_after_reregistration(demo, smell_registry):
+    from dataclasses import dataclass
+
+    from swarmeval import register_smell
+
+    @dataclass
+    class New:
+        ratio: float = 1.0
+
+    @dataclass
+    class Late:
+        limit: int = 7
+
+    traj, cm = demo.runs.trajectories[0], demo.per_run_coordination[0]
+    cfg = SmellConfig()
+    seen = []
+    register_smell("context_bloat", lambda c, section: seen.append(section), config_cls=New)
+    with pytest.raises(TypeError, match="context_bloat.*rebuild"):
+        detect_smells(traj, cm, cfg)
+    assert seen == []
+    before_late = SmellConfig()
+    register_smell("late", lambda c, section: seen.append(section), config_cls=Late)
+    detect_smells(traj, cm, before_late)
+    assert seen == [New(), Late()]
+
+
 def test_late_and_premature_registers_two_smells(smell_registry):
     S = smell_registry
     assert list(S._REGISTRY) == ["redundant_delegation", "agent_ping_pong", "over_agentization",
