@@ -71,6 +71,8 @@ class EfficiencyMetrics:
     message_tokens: int = 0
     cost_usd: Optional[float] = None
     cost_complete: bool = True
+    duration_complete: bool = True  # False when a call's duration is unknown (a bare stream)
+    unknown_duration_calls: int = 0
     wall_clock_s: float = 0.0
     agent_time_s: float = 0.0     # sum of agent self time (aggregate work)
     llm_latency_s: float = 0.0
@@ -113,6 +115,9 @@ def compute_efficiency(traj: Trajectory, pricing: Optional[PricingTable] = None)
             m.input_tokens += ev.prompt_tokens
             m.output_tokens += ev.output_tokens
             m.llm_latency_s += ev.duration_s
+            if ev.metadata.get("duration_unknown"):
+                m.unknown_duration_calls += 1
+                m.duration_complete = False
             if cost is None:
                 m.cost_complete = False
             else:

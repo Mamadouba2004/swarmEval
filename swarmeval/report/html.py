@@ -24,7 +24,7 @@ from ..graph.builder import ExecutionGraph, build_graph
 from ..graph.export import _edge_label, _inferred
 from ..schema import Event, Trajectory
 from .text import (CONTRIBUTION_NOTES, _money, _pct, _per_trial, _run_shape, _spread, coordination_caveats,
-                   coordination_rows)
+                   coordination_rows, durations_note)
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..metrics.coordination import CoordinationMetrics
@@ -448,6 +448,8 @@ def _phase1(result: Any) -> List[str]:
     if not complete:
         out.append('<p class="note">* cost incomplete: some models have no pricing entry (unpriced calls are '
                    "excluded, not counted as $0; re-price with <code>swarmeval report --pricing</code>)</p>")
+    if not eff.duration_complete:
+        out.append(f'<p class="note">* {_e(durations_note(eff))}</p>')
     if eff.per_agent:
         out += ["<h3>Agents (per run, mean)</h3>", '<div class="tablewrap"><table><tr><th>Agent</th><th>Role</th>'
                 '<th>Token share</th><th class="num">LLM</th><th class="num">Tools</th><th class="num">Msgs</th>'
@@ -470,7 +472,7 @@ def _phase1(result: Any) -> List[str]:
     return out
 
 
-def _coordination_tiles(cs: Any) -> List[str]:
+def _coordination_tiles(cs: Any, eff: Any = None) -> List[str]:
     out = ["<h2>Coordination</h2>",
            f'<p class="sub">{cs.n_runs} runs · values are means over runs (range)</p>']
     group: List[str] = []
@@ -482,7 +484,7 @@ def _coordination_tiles(cs: Any) -> List[str]:
             continue
         name, definition = _split_label(row[0])
         group.append(_tile(name, row[1], definition))
-    for warn, text in coordination_caveats(cs):
+    for warn, text in coordination_caveats(cs, eff):
         out.append(f'<p class="note{" warn" if warn else ""}">{"⚠ " if warn else ""}{_e(text)}</p>')
     return out
 
@@ -585,7 +587,7 @@ def render_html(result: Any, path: Optional[str] = None, run_index: int = 0) -> 
                     "this report (run without <code>--no-coordination</code> to see the agent graph, critical "
                     "path, observed contribution and diagnostics).</p>"))
     else:
-        body += _coordination_tiles(cs)
+        body += _coordination_tiles(cs, result.efficiency)
         if failed:
             body.append(failed)
     if n_runs:

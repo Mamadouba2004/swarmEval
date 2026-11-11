@@ -254,6 +254,49 @@ def test_stream_inside_llm_call_marks_its_cost_unknown(is_async):
     assert not compute_efficiency(traj, PricingTable()).cost_complete  # re-pricing keeps it unknown
 
 
+def streamed_swarm(stream=True):
+    _, client = streaming_client()
+
+    def swarm(task, ctx):
+        with ctx.agent("a"):
+            client.messages.create(model="claude-sonnet-5", messages=[{"role": "user", "content": "x" * 4000}],
+                                   stream=stream)
+        return "42"
+    return swarm
+
+
+def test_bare_streamed_call_marks_durations_incomplete():
+    """PR #8 review round 4: ``duration_unknown`` was write-only, so a streamed
+    call added 0 s to latency, work and the critical path and no report said
+    durations were incomplete."""
+    res = evaluate(streamed_swarm(), five_tasks(), clock_factory=SimClock)
+    assert all(e.duration_complete is False and e.unknown_duration_calls == 1 for e in res.per_run)
+    assert res.efficiency.duration_complete is False and res.efficiency.unknown_duration_calls == 5
+    assert res.efficiency.to_dict()["duration_complete"] is False
+    report, page = res.report(), render_html(res)
+    assert "* durations incomplete: 5 streamed call(s) recorded with unknown duration" in report
+    assert "⚠ durations incomplete" in report  # also qualifies the COORDINATION numbers
+    assert page.count("durations incomplete") == 2
+
+
+def test_run_without_streams_has_complete_durations():
+    res = evaluate(streamed_swarm(stream=False), five_tasks(), clock_factory=SimClock)
+    assert res.efficiency.duration_complete is True and res.efficiency.unknown_duration_calls == 0
+    assert all(e.duration_complete for e in res.per_run)
+    assert "durations incomplete" not in res.report() and "durations incomplete" not in render_html(res)
+
+
+def test_streamed_call_estimate_includes_the_system_prompt():
+    """PR #8 review round 4: the estimate left out ``system``."""
+    _, client = streaming_client()
+    messages, system = [{"role": "user", "content": "hi"}], "S" * 4000
+    ctx = started_ctx()
+    with ctx.agent("a"):
+        client.messages.create(model="claude-sonnet-5", messages=messages, system=system, stream=True)
+    (call,) = ctx.finish().llm_calls()
+    assert call.input_tokens == estimate_tokens(messages) + estimate_tokens(system)
+
+
 # -- audit 3: a crashing evaluator is visible --------------------------------- #
 def broken(task, output, traj):
     raise NameError("typo")

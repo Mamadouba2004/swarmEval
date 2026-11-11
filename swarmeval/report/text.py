@@ -104,6 +104,8 @@ def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
     if not eff.cost_complete:
         parts.append("  * cost incomplete: some models have no pricing entry (unpriced calls are excluded, "
                      "not counted as $0; re-price with `swarmeval report --pricing`)")
+    if not eff.duration_complete:
+        parts.append("  * " + durations_note(eff))
     if perf.trials > 1:
         parts.append("  per-trial success: " + _per_trial(perf))
 
@@ -209,10 +211,17 @@ def coordination_rows(cs: Any) -> List[Optional[Tuple[str, str]]]:
     return rows
 
 
-def coordination_caveats(cs: Any) -> List[Tuple[bool, str]]:
+def durations_note(eff: Any) -> str:
+    return (f"durations incomplete: {eff.unknown_duration_calls} streamed call(s) recorded with unknown duration "
+            "(latency, work and critical path undercount)")
+
+
+def coordination_caveats(cs: Any, eff: Any = None) -> List[Tuple[bool, str]]:
     """``(is_warning, text)`` notes that qualify the COORDINATION numbers
-    (shared by the text and HTML reports)."""
+    (shared by the text and HTML reports); ``eff`` is the efficiency summary."""
     out: List[Tuple[bool, str]] = []
+    if eff is not None and not eff.duration_complete:
+        out.append((True, durations_note(eff)))
     cov = cs.message_receive_coverage
     if cov is not None and cov.mean < 1.0:
         out.append((True, f"receive events recorded for {cov.mean * 100:.0f}% of messages: the remaining message "
@@ -243,7 +252,7 @@ def render_coordination(result: Any) -> str:
         rows += [_failed_row(result), None]
     rows += [None if r is None else _row(*r) for r in coordination_rows(cs)]
     parts = [box("COORDINATION", rows, width=_LABEL_W + _VALUE_W + 4)]
-    parts += [("  ⚠ " if warn else "  ") + text for warn, text in coordination_caveats(cs)]
+    parts += [("  ⚠ " if warn else "  ") + text for warn, text in coordination_caveats(cs, result.efficiency)]
 
     if cs.contribution:
         aw = max([16] + [len(a) + 1 for a in cs.contribution])

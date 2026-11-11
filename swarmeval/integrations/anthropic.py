@@ -16,7 +16,7 @@ Calls from threads that do not carry the span's context (a bare
 A streamed call (``stream=True``) has no usage yet: inside an agent span it is
 recorded as one LLM call of unknown cost whose input tokens are an estimate;
 its output tokens and duration are not recorded (flagged ``input_tokens_estimated``
-and ``duration_unknown``).  Inside ``span.llm_call`` it makes that call's cost
+and ``duration_unknown``; the reports then say durations are incomplete).  Inside ``span.llm_call`` it makes that call's cost
 unknown.
 ``client.messages.stream(...)`` is not wrapped: those calls are not recorded.
 """
@@ -123,7 +123,7 @@ def _mark_streamed() -> None:
 
 def _mark_stream_call(call: LLMCall, kwargs: dict) -> None:
     """The call closes when the stream is returned: no usage, output or real duration yet."""
-    call.input_tokens = estimate_tokens(kwargs.get("messages"))
+    call.input_tokens = estimate_tokens(kwargs.get("messages")) + estimate_tokens(kwargs.get("system"))
     call.metadata.update(cost_unknown=True, input_tokens_estimated=True, duration_unknown=True)
 
 
