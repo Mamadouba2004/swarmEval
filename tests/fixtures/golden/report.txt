@@ -1,0 +1,114 @@
+╭───────────────────────────────────────────────────────────────╮
+│                        SWARM EVALUATION                       │
+├───────────────────────────────────────────────────────────────┤
+│ baseline  ·  research_briefs  ·  8 tasks × 1 trials = 8 runs  │
+├───────────────────────────────────────────────────────────────┤
+│ Task Success                                   5/8  (62.5%)   │
+│ Mean Score                                            0.896   │
+│ Constraint Pass                                      100.0%   │
+├───────────────────────────────────────────────────────────────┤
+│ Cost / Run                                            $0.12   │
+│ Cost / Successful Task                                $0.20   │
+│ Total Cost                                            $1.00   │
+│ Tokens / Run                16,997  (in 13,917 / out 3,080)   │
+│ LLM Calls / Run                                        11.0   │
+│ Tool Calls / Run                                        6.0   │
+│ Messages / Run                                          9.0   │
+├───────────────────────────────────────────────────────────────┤
+│ Wall Clock / Run                                 40.0s ±0.0   │
+│ Agent Time / Run                                      54.6s   │
+│ Waiting Time / Run                                     0.0s   │
+╰───────────────────────────────────────────────────────────────╯
+
+AGENTS (per run, mean)
+  agent           role        tokens                    llm tools  msgs    time      cost
+  synthesizer     synthesizer █████████░░░░░░░   58%  1.0   0.0   0.0   13.4s   $0.0629
+  coordinator     coordinator █████░░░░░░░░░░░   30%  3.0   0.0   5.0   11.6s   $0.0370
+  researcher_b    research    █░░░░░░░░░░░░░░░    3%  2.0   2.0   1.0    7.3s   $0.0049
+  researcher_c    research    █░░░░░░░░░░░░░░░    3%  2.0   2.0   1.0    7.3s   $0.0048
+  researcher_a    research    █░░░░░░░░░░░░░░░    3%  2.0   2.0   1.0    7.3s   $0.0048
+  critic          critic      ░░░░░░░░░░░░░░░░    3%  1.0   0.0   1.0    7.6s   $0.0104
+
+TASKS
+  task              success   score      cost  latency
+  task_01            100.0%    1.00     $0.13    40.0s
+  task_02              0.0%    0.50     $0.12    40.0s
+  task_03            100.0%    1.00     $0.12    40.0s
+  task_04              0.0%    0.83     $0.12    40.0s
+  task_05              0.0%    0.83     $0.12    40.0s
+  task_06            100.0%    1.00     $0.12    40.0s
+  task_07            100.0%    1.00     $0.12    40.0s
+  task_08            100.0%    1.00     $0.13    40.0s
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                 COORDINATION                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ 8 runs  ·  values are means over runs (range)                                │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Critical Path / Run                                                    40.0s │
+│ Actual Parallelism (work ÷ wall)                                       1.37× │
+│ Potential Parallelism (work ÷ critical path)                           1.37× │
+│ Parallel Headroom (wall − critical path)                         0.0s  1.00× │
+│ Unrecorded Time (nothing running)                                       0.0s │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Communication / Work (message ÷ LLM tokens)              0.016 (0.012–0.018) │
+│ Hub Share (agent)                                         100% (coordinator) │
+│ Redundant Tool Calls (accidental ÷ calls)                              33.3% │
+│ Redundant Artifacts (lexical)                             17.5% (0.0%–20.0%) │
+│ Context Bloat (received ÷ relevant tokens)                  8.6× (8.0×–9.8×) │
+│   Worst Call / Run (most frequent agent)                 70.1× (synthesizer) │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Dependency Coverage (receive events)                                  100.0% │
+│ Derivation Coverage (derived_from)                                    100.0% │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+OBSERVED CONTRIBUTION (provenance, not marginal effect)
+  agent             lineage  consumed     dead  coverage  utilization (tokens)
+  coordinator            0%        0%       0%      100%  █████░░░░░░░░░░░  30%
+  researcher_a         100%      100%       0%      100%  █░░░░░░░░░░░░░░░   3%
+  researcher_b         100%      100%       0%      100%  █░░░░░░░░░░░░░░░   3%
+  researcher_c           0%        0%     100%      100%  █░░░░░░░░░░░░░░░   3%
+  critic               100%      100%       0%      100%  ░░░░░░░░░░░░░░░░   3%
+  synthesizer          100%        0%       0%   unknown  █████████░░░░░░░  58%
+  lineage = runs where its artifacts reached the final output; consumed = an artifact used by another agent;
+  dead = nothing it sent was used (only over runs with complete provenance); coverage = provenance coverage
+
+DIAGNOSTICS (hypotheses to test, not verdicts)
+  ⚠ HIGH  context_bloat  ·  8/8 runs (100%)  ·  coordinator 8, synthesizer 8
+      Observed:   synthesizer's largest prompt was 9,088 tokens, 57.9× the 157 tokens traceable to its
+                  recorded inputs (1 such call(s), 8,931 untraced tokens in total).
+      Hypothesis: synthesizer may be receiving more context than its task needs, or reading inputs that
+                  were not recorded.
+      Test:       Re-run with synthesizer's prompt limited to its recorded inputs and compare success
+                  and cost.
+  ⚠ HIGH  under_specialization  ·  8/8 runs (100%)  ·  researcher_a 8, researcher_c 8
+      Observed:   researcher_a and researcher_c share the role 'research'; 100% of their distinct tool
+                  calls overlap (Jaccard, 2 shared) and 1 of their artifacts match each other (68%
+                  similar).
+      Hypothesis: The two research agents may not have distinct responsibilities, which is consistent
+                  with overlapping scopes in their instructions.
+      Test:       Re-run with disjoint scopes for researcher_a and researcher_c (or with one of them
+                  removed) and compare success and cost.
+  ⚠ MED   coordinator_bottleneck  ·  8/8 runs (100%)  ·  coordinator 8
+      Observed:   coordinator took part in 100% of 9 messages, with 5 peers; 40% of the messages it sent
+                  passed on other agents' artifacts; its own calls are 29% of the critical path (11.6s
+                  of 40.0s).
+      Hypothesis: Routing work through coordinator may be lengthening the run and concentrating failure
+                  risk in one agent.
+      Test:       Re-run with direct hand-offs between coordinator's peers (bypassing coordinator for
+                  relays) and compare wall clock, success and cost.
+  ⚠ MED   dead_agent  ·  8/8 runs (100%)  ·  researcher_c 8
+      Observed:   researcher_c used 3% of the run's tokens; none of its 1 artifact(s) or 1 message(s)
+                  was observed in use by another agent (provenance coverage 100%).
+      Hypothesis: researcher_c's work may not be reaching the result; removing it is consistent with the
+                  record, but only an ablation can show its effect on success.
+      Test:       Re-run without researcher_c and compare success and cost.
+  ⚠ MED   redundant_delegation  ·  8/8 runs (100%)  ·  coordinator 8, researcher_a 8, researcher_c 8
+      Observed:   coordinator delegated to researcher_a and researcher_c, who then made 2 identical tool
+                  call(s) (web_search); the most similar pair of their assignments was 100% similar.
+      Hypothesis: The delegation may be giving researcher_a and researcher_c overlapping scopes, so the
+                  same lookups are repeated.
+      Test:       Re-run with disjoint scopes for researcher_a and researcher_c (or with one of them
+                  removed) and compare success and cost.
+
+Evaluators: contains_all

@@ -1,0 +1,40 @@
+COMPARISON  baseline → baseline  ·  research_briefs  ·  8 tasks, 8 paired runs
+
+  metric                        baseline      baseline  change              
+  Task Success                     62.5%         62.5%  +0.0 pts            =
+  Mean Score                        0.90          0.90  +0.00 (+0%)         =
+  Runs Crashed                         0             0  +0                  =
+  Cost / Run                       $0.12         $0.12  +$0.0000 (+0%)      =
+  Cost / Successful Task           $0.20         $0.20  +$0.0000 (+0%)      =
+  Tokens / Run                    16,997        16,997  +0 (+0%)            =
+  LLM Calls / Run                  11.00         11.00  +0.00 (+0%)         =
+  Tool Calls / Run                  6.00          6.00  +0.00 (+0%)         =
+  Messages / Run                    9.00          9.00  +0.00 (+0%)         =
+  Wall Clock / Run                 40.0s         40.0s  +0.0s (+0%)         =
+  Agent Time / Run                 54.6s         54.6s  +0.0s (+0%)         =
+  Errors / Run                      0.00          0.00  +0.00               =
+  Critical Path / Run              40.0s         40.0s  +0.0s (+0%)         =
+  Actual Parallelism                1.37          1.37  +0.00 (+0%)         =
+  Potential Parallelism             1.37          1.37  +0.00 (+0%)         =
+  Communication / Work              0.02          0.02  +0.00 (+0%)         =
+  Redundant Tool Calls             33.3%         33.3%  +0.0 pts            =
+  Redundant Artifacts              17.5%         17.5%  +0.0 pts            =
+  Context Bloat                     8.64          8.64  +0.00 (+0%)         =
+  Dead Agents / Run                 1.00          1.00  +0.00 (+0%)         =
+  Smells / Run                      5.00          5.00  +0.00 (+0%)         =
+
+  no measurable difference
+  paired outcomes: 0 fail→pass, 0 pass→fail (of 8 runs with the same task and trial)
+
+AGENTS (per run, mean)
+  agent           status                     tokens                    cost
+  coordinator     both                5,113 → 5,113       $0.0370 → $0.0370
+  researcher_a    both                    535 → 535       $0.0048 → $0.0048
+  researcher_b    both                    545 → 545       $0.0049 → $0.0049
+  researcher_c    both                    537 → 537       $0.0048 → $0.0048
+  critic          both                    488 → 488       $0.0104 → $0.0104
+  synthesizer     both                9,779 → 9,779       $0.0629 → $0.0629
+
+  ! fewer than 3 trials per task: differences may be noise (significance testing is Phase 3)
+
+  Differences are measured, not tested for significance (Phase 3).

@@ -1,0 +1,1110 @@
+{
+ "coordination": {
+  "communication": {
+   "body_tokens": {
+    "max": 310.0,
+    "mean": 266.5,
+    "min": 201.0,
+    "n": 8,
+    "std": 37.179103193672034,
+    "total": 2132.0
+   },
+   "broadcasts": {
+    "max": 1.0,
+    "mean": 1.0,
+    "min": 1.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 8.0
+   },
+   "by_category": {
+    "coordination": {
+     "body_tokens": 138.875,
+     "messages": 5.0
+    },
+    "information": {
+     "body_tokens": 0.0,
+     "messages": 0.0
+    },
+    "other": {
+     "body_tokens": 0.0,
+     "messages": 0.0
+    },
+    "work_product": {
+     "body_tokens": 127.625,
+     "messages": 4.0
+    }
+   },
+   "comm_work_ratio": {
+    "max": 0.01817116060961313,
+    "mean": 0.015673314234416008,
+    "min": 0.011899123845607389,
+    "n": 8,
+    "std": 0.00214113383460456,
+    "total": 0.12538651387532807
+   },
+   "hub_agents": {
+    "coordinator": 8
+   },
+   "hub_share": {
+    "max": 1.0,
+    "mean": 1.0,
+    "min": 1.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 8.0
+   },
+   "messages": {
+    "max": 9.0,
+    "mean": 9.0,
+    "min": 9.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 72.0
+   },
+   "n_runs": 8,
+   "per_agent": {
+    "coordinator": {
+     "body_tokens_sent": 138.875,
+     "fan_in": 4.0,
+     "fan_out": 5.0,
+     "messages_received": 4.0,
+     "messages_sent": 5.0,
+     "relay_fraction": 0.4
+    },
+    "critic": {
+     "body_tokens_sent": 11.25,
+     "fan_in": 3.0,
+     "fan_out": 2.0,
+     "messages_received": 1.0,
+     "messages_sent": 1.0,
+     "relay_fraction": 1.0
+    },
+    "researcher_a": {
+     "body_tokens_sent": 34.625,
+     "fan_in": 1.0,
+     "fan_out": 3.0,
+     "messages_received": 1.0,
+     "messages_sent": 1.0,
+     "relay_fraction": 0.0
+    },
+    "researcher_b": {
+     "body_tokens_sent": 45.0,
+     "fan_in": 1.0,
+     "fan_out": 3.0,
+     "messages_received": 1.0,
+     "messages_sent": 1.0,
+     "relay_fraction": 0.0
+    },
+    "researcher_c": {
+     "body_tokens_sent": 36.75,
+     "fan_in": 1.0,
+     "fan_out": 1.0,
+     "messages_received": 1.0,
+     "messages_sent": 1.0,
+     "relay_fraction": 0.0
+    },
+    "synthesizer": {
+     "body_tokens_sent": 0.0,
+     "fan_in": 4.0,
+     "fan_out": 0.0,
+     "messages_received": 1.0,
+     "messages_sent": 0.0
+    }
+   },
+   "receive_delay_mean_s": {
+    "max": 0.00016444444444473226,
+    "mean": 9.777777777770286e-05,
+    "min": 8.888888888552376e-06,
+    "n": 8,
+    "std": 4.988876515712433e-05,
+    "total": 0.0007822222222216229
+   },
+   "repeated_messages": {
+    "max": 0.0,
+    "mean": 0.0,
+    "min": 0.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 0.0
+   },
+   "used_edge_ratio": {
+    "max": 0.8888888888888888,
+    "mean": 0.8888888888888888,
+    "min": 0.8888888888888888,
+    "n": 8,
+    "std": 0.0,
+    "total": 7.111111111111111
+   }
+  },
+  "context": {
+   "bases": {
+    "referenced": 8
+   },
+   "excess": {
+    "max": 13084.0,
+    "mean": 12978.875,
+    "min": 12909.0,
+    "n": 8,
+    "std": 59.575732115878,
+    "total": 103831.0
+   },
+   "n_runs": 8,
+   "ratio": {
+    "max": 9.802696948190206,
+    "mean": 8.638814272078433,
+    "min": 7.956744450768356,
+    "n": 8,
+    "std": 0.6168554920980602,
+    "total": 69.11051417662746
+   },
+   "worst_agents": {
+    "synthesizer": 8
+   },
+   "worst_ratio": {
+    "max": 97.40860215053763,
+    "mean": 70.11917257981534,
+    "min": 57.5253164556962,
+    "n": 8,
+    "std": 14.545878418860783,
+    "total": 560.9533806385227
+   }
+  },
+  "contribution": {
+   "coordinator": {
+    "consumed_rate": 0.0,
+    "dead_known_runs": 8,
+    "dead_rate": 0.0,
+    "lineage_rate": 0.0,
+    "provenance_coverage": {
+     "max": 1.0,
+     "mean": 1.0,
+     "min": 1.0,
+     "n": 8,
+     "std": 0.0,
+     "total": 8.0
+    },
+    "runs": 8,
+    "status_counts": {
+     "delivered_only": 8
+    }
+   },
+   "critic": {
+    "consumed_rate": 1.0,
+    "dead_known_runs": 8,
+    "dead_rate": 0.0,
+    "lineage_rate": 1.0,
+    "provenance_coverage": {
+     "max": 1.0,
+     "mean": 1.0,
+     "min": 1.0,
+     "n": 8,
+     "std": 0.0,
+     "total": 8.0
+    },
+    "runs": 8,
+    "status_counts": {
+     "in_final_lineage": 8
+    }
+   },
+   "researcher_a": {
+    "consumed_rate": 1.0,
+    "dead_known_runs": 8,
+    "dead_rate": 0.0,
+    "lineage_rate": 1.0,
+    "provenance_coverage": {
+     "max": 1.0,
+     "mean": 1.0,
+     "min": 1.0,
+     "n": 8,
+     "std": 0.0,
+     "total": 8.0
+    },
+    "runs": 8,
+    "status_counts": {
+     "in_final_lineage": 8
+    }
+   },
+   "researcher_b": {
+    "consumed_rate": 1.0,
+    "dead_known_runs": 8,
+    "dead_rate": 0.0,
+    "lineage_rate": 1.0,
+    "provenance_coverage": {
+     "max": 1.0,
+     "mean": 1.0,
+     "min": 1.0,
+     "n": 8,
+     "std": 0.0,
+     "total": 8.0
+    },
+    "runs": 8,
+    "status_counts": {
+     "in_final_lineage": 8
+    }
+   },
+   "researcher_c": {
+    "consumed_rate": 0.0,
+    "dead_known_runs": 8,
+    "dead_rate": 1.0,
+    "lineage_rate": 0.0,
+    "provenance_coverage": {
+     "max": 1.0,
+     "mean": 1.0,
+     "min": 1.0,
+     "n": 8,
+     "std": 0.0,
+     "total": 8.0
+    },
+    "runs": 8,
+    "status_counts": {
+     "delivered_only": 8
+    }
+   },
+   "synthesizer": {
+    "consumed_rate": 0.0,
+    "dead_known_runs": 8,
+    "dead_rate": 0.0,
+    "lineage_rate": 1.0,
+    "provenance_coverage": null,
+    "runs": 8,
+    "status_counts": {
+     "in_final_lineage": 8
+    }
+   }
+  },
+  "dead_agents_per_run": {
+   "max": 1.0,
+   "mean": 1.0,
+   "min": 1.0,
+   "n": 8,
+   "std": 0.0,
+   "total": 8.0
+  },
+  "dependency": {
+   "actual_parallelism": {
+    "max": 1.3663723216677826,
+    "mean": 1.3663574640324236,
+    "min": 1.3663392188211887,
+    "n": 8,
+    "std": 1.1647071685171032e-05,
+    "total": 10.93085971225939
+   },
+   "critical_path_s": {
+    "max": 39.98937858585858,
+    "mean": 39.98732358585858,
+    "min": 39.983818585858586,
+    "n": 8,
+    "std": 0.0019377674930550147,
+    "total": 319.89858868686866
+   },
+   "critical_path_share": {
+    "coordinator": 0.2899761803665047,
+    "critic": 0.19071662169100045,
+    "researcher_b": 0.16029002720391844,
+    "researcher_c": 0.022899708185991317,
+    "synthesizer": 0.3361174625525851
+   },
+   "depth": {
+    "max": 9.0,
+    "mean": 9.0,
+    "min": 9.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 72.0
+   },
+   "headroom_ratio": {
+    "max": 1.0,
+    "mean": 1.0,
+    "min": 1.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 8.0
+   },
+   "headroom_s": {
+    "max": 0.0,
+    "mean": 0.0,
+    "min": 0.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 0.0
+   },
+   "isolated_agents": {},
+   "n_runs": 8,
+   "potential_parallelism": {
+    "max": 1.3663723216677826,
+    "mean": 1.3663574640324236,
+    "min": 1.3663392188211887,
+    "n": 8,
+    "std": 1.1647071685171032e-05,
+    "total": 10.93085971225939
+   },
+   "runs_with_cycles": 0,
+   "unrecorded_s": {
+    "max": 0.0,
+    "mean": 0.0,
+    "min": 0.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 0.0
+   },
+   "work_s": {
+    "max": 54.639503030303025,
+    "mean": 54.63697803030303,
+    "min": 54.63278303030303,
+    "n": 8,
+    "std": 0.0022338116047935785,
+    "total": 437.0958242424242
+   }
+  },
+  "derivation_coverage": {
+   "max": 1.0,
+   "mean": 1.0,
+   "min": 1.0,
+   "n": 8,
+   "std": 0.0,
+   "total": 8.0
+  },
+  "diagnostics": {
+   "n_runs": 8,
+   "smells": [
+    {
+     "agents": {
+      "coordinator": 8,
+      "synthesizer": 8
+     },
+     "example_runs": [
+      "run_0880cd05d1f2",
+      "run_c5a2d167cc07",
+      "run_a999d8dd2706"
+     ],
+     "hypothesis": "synthesizer may be receiving more context than its task needs, or reading inputs that were not recorded.",
+     "inferred_runs": 0,
+     "intervention": "Re-run with synthesizer's prompt limited to its recorded inputs and compare success and cost.",
+     "max_severity": "high",
+     "n_runs": 8,
+     "observation": "synthesizer's largest prompt was 9,088 tokens, 57.9\u00d7 the 157 tokens traceable to its recorded inputs (1 such call(s), 8,931 untraced tokens in total).",
+     "prevalence": 1.0,
+     "runs_affected": 8,
+     "severity_counts": {
+      "high": 8
+     },
+     "smell": "context_bloat"
+    },
+    {
+     "agents": {
+      "researcher_a": 8,
+      "researcher_c": 8
+     },
+     "example_runs": [
+      "run_0880cd05d1f2",
+      "run_c5a2d167cc07",
+      "run_a999d8dd2706"
+     ],
+     "hypothesis": "The two research agents may not have distinct responsibilities, which is consistent with overlapping scopes in their instructions.",
+     "inferred_runs": 0,
+     "intervention": "Re-run with disjoint scopes for researcher_a and researcher_c (or with one of them removed) and compare success and cost.",
+     "max_severity": "high",
+     "n_runs": 8,
+     "observation": "researcher_a and researcher_c share the role 'research'; 100% of their distinct tool calls overlap (Jaccard, 2 shared) and 1 of their artifacts match each other (68% similar).",
+     "prevalence": 1.0,
+     "runs_affected": 8,
+     "severity_counts": {
+      "high": 7,
+      "medium": 1
+     },
+     "smell": "under_specialization"
+    },
+    {
+     "agents": {
+      "coordinator": 8
+     },
+     "example_runs": [
+      "run_0880cd05d1f2",
+      "run_c5a2d167cc07",
+      "run_a999d8dd2706"
+     ],
+     "hypothesis": "Routing work through coordinator may be lengthening the run and concentrating failure risk in one agent.",
+     "inferred_runs": 0,
+     "intervention": "Re-run with direct hand-offs between coordinator's peers (bypassing coordinator for relays) and compare wall clock, success and cost.",
+     "max_severity": "medium",
+     "n_runs": 8,
+     "observation": "coordinator took part in 100% of 9 messages, with 5 peers; 40% of the messages it sent passed on other agents' artifacts; its own calls are 29% of the critical path (11.6s of 40.0s).",
+     "prevalence": 1.0,
+     "runs_affected": 8,
+     "severity_counts": {
+      "medium": 8
+     },
+     "smell": "coordinator_bottleneck"
+    },
+    {
+     "agents": {
+      "researcher_c": 8
+     },
+     "example_runs": [
+      "run_0880cd05d1f2",
+      "run_c5a2d167cc07",
+      "run_a999d8dd2706"
+     ],
+     "hypothesis": "researcher_c's work may not be reaching the result; removing it is consistent with the record, but only an ablation can show its effect on success.",
+     "inferred_runs": 0,
+     "intervention": "Re-run without researcher_c and compare success and cost.",
+     "max_severity": "medium",
+     "n_runs": 8,
+     "observation": "researcher_c used 3% of the run's tokens; none of its 1 artifact(s) or 1 message(s) was observed in use by another agent (provenance coverage 100%).",
+     "prevalence": 1.0,
+     "runs_affected": 8,
+     "severity_counts": {
+      "medium": 8
+     },
+     "smell": "dead_agent"
+    },
+    {
+     "agents": {
+      "coordinator": 8,
+      "researcher_a": 8,
+      "researcher_c": 8
+     },
+     "example_runs": [
+      "run_0880cd05d1f2",
+      "run_c5a2d167cc07",
+      "run_a999d8dd2706"
+     ],
+     "hypothesis": "The delegation may be giving researcher_a and researcher_c overlapping scopes, so the same lookups are repeated.",
+     "inferred_runs": 0,
+     "intervention": "Re-run with disjoint scopes for researcher_a and researcher_c (or with one of them removed) and compare success and cost.",
+     "max_severity": "medium",
+     "n_runs": 8,
+     "observation": "coordinator delegated to researcher_a and researcher_c, who then made 2 identical tool call(s) (web_search); the most similar pair of their assignments was 100% similar.",
+     "prevalence": 1.0,
+     "runs_affected": 8,
+     "severity_counts": {
+      "medium": 8
+     },
+     "smell": "redundant_delegation"
+    }
+   ],
+   "total": 48
+  },
+  "message_receive_coverage": {
+   "max": 1.0,
+   "mean": 1.0,
+   "min": 1.0,
+   "n": 8,
+   "std": 0.0,
+   "total": 8.0
+  },
+  "n_runs": 8,
+  "redundancy": {
+   "accidental_duplicates": {
+    "max": 2.0,
+    "mean": 2.0,
+    "min": 2.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 16.0
+   },
+   "artifact_redundancy": {
+    "max": 0.2,
+    "mean": 0.17500000000000002,
+    "min": 0.0,
+    "n": 8,
+    "std": 0.07071067811865475,
+    "total": 1.4000000000000001
+   },
+   "degraded_runs": 0,
+   "intentional_artifacts": {
+    "max": 0.0,
+    "mean": 0.0,
+    "min": 0.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 0.0
+   },
+   "methods": {
+    "lexical": 8
+   },
+   "n_runs": 8,
+   "redundant_artifacts": {
+    "max": 1.0,
+    "mean": 0.875,
+    "min": 0.0,
+    "n": 8,
+    "std": 0.3535533905932738,
+    "total": 7.0
+   },
+   "retry_duplicates": {
+    "max": 0.0,
+    "mean": 0.0,
+    "min": 0.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 0.0
+   },
+   "self_repeats": {
+    "max": 0.0,
+    "mean": 0.0,
+    "min": 0.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 0.0
+   },
+   "similarity_truncated_runs": 0,
+   "tool_redundancy": {
+    "max": 0.3333333333333333,
+    "mean": 0.3333333333333333,
+    "min": 0.3333333333333333,
+    "n": 8,
+    "std": 0.0,
+    "total": 2.6666666666666665
+   },
+   "verification_duplicates": {
+    "max": 0.0,
+    "mean": 0.0,
+    "min": 0.0,
+    "n": 8,
+    "std": 0.0,
+    "total": 0.0
+   }
+  },
+  "smells_per_run": {
+   "max": 5.0,
+   "mean": 5.0,
+   "min": 5.0,
+   "n": 8,
+   "std": 0.0,
+   "total": 40.0
+  },
+  "utilization": {
+   "coordinator": {
+    "artifacts_produced": 0.0,
+    "busy_share": 0.21222570816713968,
+    "downstream_refs": 0.0,
+    "llm_call_share": 0.2727272727272727,
+    "messages_sent": 5.0,
+    "token_share": 0.3008418343505943,
+    "tool_call_share": 0.0
+   },
+   "critic": {
+    "artifacts_produced": 1.0,
+    "busy_share": 0.13958032707652004,
+    "downstream_refs": 2.0,
+    "llm_call_share": 0.09090909090909091,
+    "messages_sent": 1.0,
+    "token_share": 0.028709069478231507,
+    "tool_call_share": 0.0
+   },
+   "researcher_a": {
+    "artifacts_produced": 1.0,
+    "busy_share": 0.13406318373471268,
+    "downstream_refs": 3.0,
+    "llm_call_share": 0.18181818181818182,
+    "messages_sent": 1.0,
+    "token_share": 0.03145359614282065,
+    "tool_call_share": 0.3333333333333333
+   },
+   "researcher_b": {
+    "artifacts_produced": 1.0,
+    "busy_share": 0.13407077925710179,
+    "downstream_refs": 3.0,
+    "llm_call_share": 0.18181818181818182,
+    "messages_sent": 1.0,
+    "token_share": 0.03206358092410627,
+    "tool_call_share": 0.3333333333333333
+   },
+   "researcher_c": {
+    "artifacts_produced": 1.0,
+    "busy_share": 0.13406473963512627,
+    "downstream_refs": 0.0,
+    "llm_call_share": 0.18181818181818182,
+    "messages_sent": 1.0,
+    "token_share": 0.031579769482837285,
+    "tool_call_share": 0.3333333333333333
+   },
+   "synthesizer": {
+    "artifacts_produced": 1.0,
+    "busy_share": 0.24599526212939954,
+    "downstream_refs": 0.0,
+    "llm_call_share": 0.09090909090909091,
+    "messages_sent": 0.0,
+    "token_share": 0.57535214962141,
+    "tool_call_share": 0.0
+   }
+  }
+ },
+ "coordination_errors": {},
+ "efficiency": {
+  "agent_time_s": {
+   "max": 54.639503030303025,
+   "mean": 54.63697803030303,
+   "min": 54.63278303030303,
+   "n": 8,
+   "std": 0.0022338116047935785,
+   "total": 437.0958242424242
+  },
+  "cost_complete": true,
+  "cost_per_success": 0.19970439999999998,
+  "cost_total": 0.9985219999999999,
+  "cost_usd": {
+   "max": 0.12506899999999999,
+   "mean": 0.12481524999999999,
+   "min": 0.124367,
+   "n": 8,
+   "std": 0.00023839448100035075,
+   "total": 0.9985219999999999
+  },
+  "duration_complete": true,
+  "errors": {
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n": 8,
+   "std": 0.0,
+   "total": 0.0
+  },
+  "input_tokens": {
+   "max": 13980.0,
+   "mean": 13916.875,
+   "min": 13812.0,
+   "n": 8,
+   "std": 55.845290119860856,
+   "total": 111335.0
+  },
+  "llm_calls": {
+   "max": 11.0,
+   "mean": 11.0,
+   "min": 11.0,
+   "n": 8,
+   "std": 0.0,
+   "total": 88.0
+  },
+  "messages": {
+   "max": 9.0,
+   "mean": 9.0,
+   "min": 9.0,
+   "n": 8,
+   "std": 0.0,
+   "total": 72.0
+  },
+  "output_tokens": {
+   "max": 3080.0,
+   "mean": 3080.0,
+   "min": 3080.0,
+   "n": 8,
+   "std": 0.0,
+   "total": 24640.0
+  },
+  "per_agent": {
+   "coordinator": {
+    "artifacts_produced": 0.0,
+    "cost_complete": true,
+    "cost_usd": 0.036966874999999996,
+    "errors": 0.0,
+    "idle_time_s": 0.0,
+    "input_tokens": 4543.375,
+    "invocation_rate": 1.0,
+    "llm_calls": 3.0,
+    "messages_sent": 5.0,
+    "output_tokens": 570.0,
+    "role": "coordinator",
+    "self_time_s": 11.595371363636362,
+    "token_share": 0.30084206655635226,
+    "tokens": 5113.375,
+    "tool_calls": 0.0,
+    "total_cost_usd": 0.29573499999999997
+   },
+   "critic": {
+    "artifacts_produced": 1.0,
+    "cost_complete": true,
+    "cost_usd": 0.01044,
+    "errors": 0.0,
+    "idle_time_s": 0.0,
+    "input_tokens": 88.0,
+    "invocation_rate": 1.0,
+    "llm_calls": 1.0,
+    "messages_sent": 1.0,
+    "output_tokens": 400.0,
+    "role": "critic",
+    "self_time_s": 7.626247272727273,
+    "token_share": 0.02871116013973157,
+    "tokens": 488.0,
+    "tool_calls": 0.0,
+    "total_cost_usd": 0.08352
+   },
+   "researcher_a": {
+    "artifacts_produced": 1.0,
+    "cost_complete": true,
+    "cost_usd": 0.00482925,
+    "errors": 0.0,
+    "idle_time_s": 0.0,
+    "input_tokens": 64.625,
+    "invocation_rate": 1.0,
+    "llm_calls": 2.0,
+    "messages_sent": 1.0,
+    "output_tokens": 470.0,
+    "role": "research",
+    "self_time_s": 7.324807222222221,
+    "token_share": 0.031454311454311455,
+    "tokens": 534.625,
+    "tool_calls": 2.0,
+    "total_cost_usd": 0.038634
+   },
+   "researcher_b": {
+    "artifacts_produced": 1.0,
+    "cost_complete": true,
+    "cost_usd": 0.00485,
+    "errors": 0.0,
+    "idle_time_s": 0.0,
+    "input_tokens": 75.0,
+    "invocation_rate": 1.0,
+    "llm_calls": 2.0,
+    "messages_sent": 1.0,
+    "output_tokens": 470.0,
+    "role": "research",
+    "self_time_s": 7.32522222222222,
+    "token_share": 0.03206471777900349,
+    "tokens": 545.0,
+    "tool_calls": 2.0,
+    "total_cost_usd": 0.0388
+   },
+   "researcher_c": {
+    "artifacts_produced": 1.0,
+    "cost_complete": true,
+    "cost_usd": 0.0048335,
+    "errors": 0.0,
+    "idle_time_s": 0.0,
+    "input_tokens": 66.75,
+    "invocation_rate": 1.0,
+    "llm_calls": 2.0,
+    "messages_sent": 1.0,
+    "output_tokens": 470.0,
+    "role": "research",
+    "self_time_s": 7.324892222222221,
+    "token_share": 0.03157933443647729,
+    "tokens": 536.75,
+    "tool_calls": 2.0,
+    "total_cost_usd": 0.038668
+   },
+   "synthesizer": {
+    "artifacts_produced": 1.0,
+    "cost_complete": true,
+    "cost_usd": 0.062895625,
+    "errors": 0.0,
+    "idle_time_s": 0.0,
+    "input_tokens": 9079.125,
+    "invocation_rate": 1.0,
+    "llm_calls": 1.0,
+    "messages_sent": 0.0,
+    "output_tokens": 700.0,
+    "role": "synthesizer",
+    "self_time_s": 13.440437727272727,
+    "token_share": 0.5753484096341239,
+    "tokens": 9779.125,
+    "tool_calls": 0.0,
+    "total_cost_usd": 0.503165
+   }
+  },
+  "streamed_cost_calls": 0,
+  "tokens": {
+   "max": 17060.0,
+   "mean": 16996.875,
+   "min": 16892.0,
+   "n": 8,
+   "std": 55.845290119860856,
+   "total": 135975.0
+  },
+  "tool_calls": {
+   "max": 6.0,
+   "mean": 6.0,
+   "min": 6.0,
+   "n": 8,
+   "std": 0.0,
+   "total": 48.0
+  },
+  "unknown_duration_calls": 0,
+  "unpriced_calls": 0,
+  "waiting_time_s": {
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n": 8,
+   "std": 0.0,
+   "total": 0.0
+  },
+  "wall_clock_s": {
+   "max": 39.98937858585858,
+   "mean": 39.98732358585858,
+   "min": 39.983818585858586,
+   "n": 8,
+   "std": 0.0019377674930550147,
+   "total": 319.89858868686866
+  }
+ },
+ "per_run": [
+  {
+   "cost_usd": 0.125024,
+   "dead_agents": [
+    "researcher_c"
+   ],
+   "llm_calls": 11,
+   "message_receive_coverage": 1.0,
+   "run_id": "run_0880cd05d1f2",
+   "score": 1.0,
+   "status": "success",
+   "success": true,
+   "task_id": "task_01",
+   "tokens": 17042,
+   "tool_calls": 6,
+   "trial": 0,
+   "wall_clock_s": 39.98917858585858
+  },
+  {
+   "cost_usd": 0.124367,
+   "dead_agents": [
+    "researcher_c"
+   ],
+   "llm_calls": 11,
+   "message_receive_coverage": 1.0,
+   "run_id": "run_c5a2d167cc07",
+   "score": 0.5,
+   "status": "success",
+   "success": false,
+   "task_id": "task_02",
+   "tokens": 16892,
+   "tool_calls": 6,
+   "trial": 0,
+   "wall_clock_s": 39.983818585858586
+  },
+  {
+   "cost_usd": 0.124828,
+   "dead_agents": [
+    "researcher_c"
+   ],
+   "llm_calls": 11,
+   "message_receive_coverage": 1.0,
+   "run_id": "run_a999d8dd2706",
+   "score": 1.0,
+   "status": "success",
+   "success": true,
+   "task_id": "task_03",
+   "tokens": 17001,
+   "tool_calls": 6,
+   "trial": 0,
+   "wall_clock_s": 39.987258585858584
+  },
+  {
+   "cost_usd": 0.12460199999999999,
+   "dead_agents": [
+    "researcher_c"
+   ],
+   "llm_calls": 11,
+   "message_receive_coverage": 1.0,
+   "run_id": "run_517149f60f2b",
+   "score": 0.8333333333333334,
+   "status": "success",
+   "success": false,
+   "task_id": "task_04",
+   "tokens": 16948,
+   "tool_calls": 6,
+   "trial": 0,
+   "wall_clock_s": 39.98561858585858
+  },
+  {
+   "cost_usd": 0.124733,
+   "dead_agents": [
+    "researcher_c"
+   ],
+   "llm_calls": 11,
+   "message_receive_coverage": 1.0,
+   "run_id": "run_cd91461e6205",
+   "score": 0.8333333333333334,
+   "status": "success",
+   "success": false,
+   "task_id": "task_05",
+   "tokens": 16976,
+   "tool_calls": 6,
+   "trial": 0,
+   "wall_clock_s": 39.98641858585858
+  },
+  {
+   "cost_usd": 0.12496499999999999,
+   "dead_agents": [
+    "researcher_c"
+   ],
+   "llm_calls": 11,
+   "message_receive_coverage": 1.0,
+   "run_id": "run_880f033d99c7",
+   "score": 1.0,
+   "status": "success",
+   "success": true,
+   "task_id": "task_06",
+   "tokens": 17032,
+   "tool_calls": 6,
+   "trial": 0,
+   "wall_clock_s": 39.98857858585858
+  },
+  {
+   "cost_usd": 0.12493399999999999,
+   "dead_agents": [
+    "researcher_c"
+   ],
+   "llm_calls": 11,
+   "message_receive_coverage": 1.0,
+   "run_id": "run_9c306c72f5a4",
+   "score": 1.0,
+   "status": "success",
+   "success": true,
+   "task_id": "task_07",
+   "tokens": 17024,
+   "tool_calls": 6,
+   "trial": 0,
+   "wall_clock_s": 39.988338585858585
+  },
+  {
+   "cost_usd": 0.12506899999999999,
+   "dead_agents": [
+    "researcher_c"
+   ],
+   "llm_calls": 11,
+   "message_receive_coverage": 1.0,
+   "run_id": "run_bb5209978f03",
+   "score": 1.0,
+   "status": "success",
+   "success": true,
+   "task_id": "task_08",
+   "tokens": 17060,
+   "tool_calls": 6,
+   "trial": 0,
+   "wall_clock_s": 39.98937858585858
+  }
+ ],
+ "performance": {
+  "constraint_pass_rate": 1.0,
+  "evaluator_errors": 0,
+  "evaluators": [
+   "contains_all"
+  ],
+  "mean_score": 0.8958333333333334,
+  "n_runs": 8,
+  "n_successes": 5,
+  "n_tasks": 8,
+  "per_task": {
+   "task_01": {
+    "category": "research",
+    "cost_complete": true,
+    "cost_usd": 0.125024,
+    "difficulty": "moderate",
+    "latency_s": 39.98917858585858,
+    "n": 1,
+    "score": 1.0,
+    "success_rate": 1.0
+   },
+   "task_02": {
+    "category": "research",
+    "cost_complete": true,
+    "cost_usd": 0.124367,
+    "difficulty": "moderate",
+    "latency_s": 39.983818585858586,
+    "n": 1,
+    "score": 0.5,
+    "success_rate": 0.0
+   },
+   "task_03": {
+    "category": "research",
+    "cost_complete": true,
+    "cost_usd": 0.124828,
+    "difficulty": "moderate",
+    "latency_s": 39.987258585858584,
+    "n": 1,
+    "score": 1.0,
+    "success_rate": 1.0
+   },
+   "task_04": {
+    "category": "research",
+    "cost_complete": true,
+    "cost_usd": 0.12460199999999999,
+    "difficulty": "moderate",
+    "latency_s": 39.98561858585858,
+    "n": 1,
+    "score": 0.8333333333333334,
+    "success_rate": 0.0
+   },
+   "task_05": {
+    "category": "research",
+    "cost_complete": true,
+    "cost_usd": 0.124733,
+    "difficulty": "moderate",
+    "latency_s": 39.98641858585858,
+    "n": 1,
+    "score": 0.8333333333333334,
+    "success_rate": 0.0
+   },
+   "task_06": {
+    "category": "research",
+    "cost_complete": true,
+    "cost_usd": 0.12496499999999999,
+    "difficulty": "moderate",
+    "latency_s": 39.98857858585858,
+    "n": 1,
+    "score": 1.0,
+    "success_rate": 1.0
+   },
+   "task_07": {
+    "category": "research",
+    "cost_complete": true,
+    "cost_usd": 0.12493399999999999,
+    "difficulty": "moderate",
+    "latency_s": 39.988338585858585,
+    "n": 1,
+    "score": 1.0,
+    "success_rate": 1.0
+   },
+   "task_08": {
+    "category": "research",
+    "cost_complete": true,
+    "cost_usd": 0.12506899999999999,
+    "difficulty": "moderate",
+    "latency_s": 39.98937858585858,
+    "n": 1,
+    "score": 1.0,
+    "success_rate": 1.0
+   }
+  },
+  "per_trial": [
+   0.625
+  ],
+  "run_errors": 0,
+  "success_rate": 0.625,
+  "trials": 1
+ },
+ "summary": {
+  "agents": [
+   "coordinator",
+   "researcher_a",
+   "researcher_b",
+   "researcher_c",
+   "critic",
+   "synthesizer"
+  ],
+  "benchmark": "research_briefs",
+  "cost": {
+   "complete": true,
+   "per_run": 0.1248,
+   "per_success": 0.1997,
+   "total": 0.9985
+  },
+  "label": "baseline",
+  "latency": {
+   "agent_time": 54.637,
+   "waiting": 0.0,
+   "wall_clock": 39.987
+  },
+  "mean_score": 0.8958,
+  "run_errors": 0,
+  "runs": 8,
+  "success_rate": 0.625,
+  "tasks": 8,
+  "tokens_per_run": 16996.9,
+  "trials": 1
+ }
+}

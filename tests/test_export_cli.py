@@ -1,6 +1,13 @@
-"""Tests for evaluate(), saving and loading run sets, JSONL export and the CLI commands."""
+"""Tests for evaluate(), saving and loading run sets, JSONL export and the CLI commands.
+
+The golden tests compare outputs with files under tests/fixtures/golden/. After an intended output change,
+regenerate them with ``SWARMEVAL_UPDATE_GOLDEN=1 .venv/bin/pytest tests/test_export_cli.py`` (this
+also replaces the demo_runs.json input), then review the diff before committing.
+"""
 import json
+import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -16,8 +23,45 @@ from swarmeval import (
     write_events_jsonl,
 )
 from swarmeval.cli import main
+from swarmeval.compare import compare
+from swarmeval.evaluate import analyze_runs, load_runset
 from swarmeval.examples.research_swarm import build_benchmark, make_swarm
+from swarmeval.report.html import render_html
+from swarmeval.report.text import render_comparison
 from swarmeval.runner import RunSet, derive_seed
+
+GOLDEN = Path(__file__).parent / "fixtures" / "golden"
+UPDATE_GOLDEN = os.environ.get("SWARMEVAL_UPDATE_GOLDEN") == "1"
+
+
+def _check_golden(name, text):
+    """Compare ``text`` with golden file ``name``, rewriting it instead when SWARMEVAL_UPDATE_GOLDEN=1."""
+    path = GOLDEN / name
+    if UPDATE_GOLDEN:
+        GOLDEN.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    assert text == path.read_text(encoding="utf-8"), f"{name} differs from the golden file"
+
+
+def _golden_result():
+    """The analysis of the stored demo run set, recording a fresh one first when regenerating."""
+    path = GOLDEN / "demo_runs.json"
+    if UPDATE_GOLDEN:
+        GOLDEN.mkdir(parents=True, exist_ok=True)
+        evaluate(make_swarm, build_benchmark(), clock_factory=SimClock).runs.save(str(path))
+    return analyze_runs(load_runset(str(path)))
+
+
+def test_golden_outputs_unchanged():
+    result = _golden_result()
+    _check_golden("metrics.json", json.dumps(result.to_dict(include_runs=False), sort_keys=True, indent=1))
+    _check_golden("report.txt", result.report())
+    _check_golden("report.html", render_html(result))
+
+
+def test_golden_compare_unchanged():
+    result = analyze_runs(load_runset(str(GOLDEN / "demo_runs.json")))
+    _check_golden("compare.txt", render_comparison(compare(result, result)))
 
 
 def test_evaluate_runs_benchmark_and_is_reproducible():
