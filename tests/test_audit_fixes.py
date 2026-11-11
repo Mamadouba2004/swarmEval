@@ -119,6 +119,15 @@ def test_demo_interrupted_before_the_first_run_writes_outputs_and_exits_130(tmp_
     assert (tmp_path / "baseline.json").exists() and (tmp_path / "r.html").exists()
 
 
+def test_demo_interrupted_before_the_first_run_notes_an_explicit_html_run(tmp_path, monkeypatch, capsys):
+    """Issue #21: with 0 runs left, an explicit --run was silently ignored."""
+    interrupt_demo_at_third_run(monkeypatch, at=1)
+    code = no_escape(main, ["demo", "--out", str(tmp_path), "--html", str(tmp_path / "r.html"), "--run", "5"])
+    assert code == 130
+    assert "--run 5 ignored (no runs to show); wrote a summary-only HTML report" in capsys.readouterr().err
+    assert (tmp_path / "r.html").exists()
+
+
 def interrupted_in_second_trial():
     """5 tasks x 2 trials, Ctrl-C at the 8th run: trial 2 is partial."""
     calls = []
