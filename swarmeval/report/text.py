@@ -102,7 +102,8 @@ def render_text(result: Any, show_agents: bool = True, show_tasks: bool = True,
             parts.append(f"  {tid:<16}{_pct(t['success_rate']):>9}{t['score']:>8.2f}"
                          f"{_money(t['cost_usd'], t.get('cost_complete', True)):>10}"
                          f"{t['latency_s']:>8.1f}s")
-    if show_coordination and getattr(result, "coordination", None) is not None:
+    if show_coordination and (getattr(result, "coordination", None) is not None
+                              or getattr(result, "coordination_errors", None)):
         parts.append("")
         parts.append(render_coordination(result))
     parts.append("")

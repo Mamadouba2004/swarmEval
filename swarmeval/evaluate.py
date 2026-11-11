@@ -264,6 +264,7 @@ def analyze_runs(runs: RunSet, pricing: Optional[PricingTable] = None, coordinat
         done = [cm for cm in per_run_coord if cm is not None]
         if first_exc is not None:
             if not done and len(per_run_coord) > 1 and len(kinds) == 1:
+                first_exc.coordination_errors = errors  # type: ignore[attr-defined]  # for the fallback report
                 raise first_exc  # every run, one cause: e.g. a missing optional dependency, not an odd trace
             warnings.warn(f"coordination analysis failed on {len(per_run_coord) - len(done)}/{len(per_run_coord)} "
                           f"runs: {type(first_exc).__name__}: {first_exc}", stacklevel=2)
@@ -298,5 +299,7 @@ def evaluate(swarm: Any, benchmark: Benchmark, trials: int = 1, seed: int = 0, e
     try:
         return analyze_runs(runs, coordination=coordination, similarity=similarity, smell_config=smell_config)
     except Exception as exc:  # the runs are done (and paid for): hand them back with the plain evaluation
-        raise AnalysisFailed(f"coordination analysis failed: {type(exc).__name__}: {exc}", runs,
-                             analyze_runs(runs, coordination=False)) from exc
+        plain = analyze_runs(runs, coordination=False)
+        plain.coordination_errors = getattr(exc, "coordination_errors", None) or {
+            t.run_id: f"{type(exc).__name__}: {exc}" for t in runs.trajectories}
+        raise AnalysisFailed(f"coordination analysis failed: {type(exc).__name__}: {exc}", runs, plain) from exc

@@ -315,4 +315,6 @@ def test_coordination_config_error_in_evaluate_keeps_the_runs(monkeypatch):
     exc = info.value
     assert len(exc.runs) == 3
     assert exc.result.coordination is None and exc.result.performance.n_runs == 3
+    assert exc.result.coordination_errors == {t.run_id: "ImportError: sentence-transformers is not installed"
+                                              for t in exc.runs.trajectories}
     assert isinstance(exc.__cause__, ImportError)

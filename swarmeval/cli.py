@@ -130,7 +130,9 @@ def cmd_demo(args: argparse.Namespace) -> int:
         result = evaluate(make_swarm, bench, trials=args.trials, clock_factory=SimClock, progress=True,
                           **_analysis_kwargs(args))
     except AnalysisFailed as exc:
-        return _write_plain_evaluation(exc, args.out)
+        code = _write_plain_evaluation(exc, args.out)
+        _write_html(exc.result, args)
+        return code
     print(result.report())
     if args.trace:
         print()
@@ -177,6 +179,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     except Exception as exc:  # every run failed the same way: the runs are on disk, show what still holds
         _analysis_failed(exc)
         result, code = analyze_runs(runs, pricing=pricing, coordination=False), 1
+        result.coordination_errors = getattr(exc, "coordination_errors", {})
     print(result.report())
     if args.trace is not None:
         if not 0 <= args.trace < len(runs):

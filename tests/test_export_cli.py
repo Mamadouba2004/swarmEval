@@ -1,6 +1,8 @@
 import json
 import sys
 
+import pytest
+
 from swarmeval.examples.research_swarm import build_benchmark, make_swarm
 from swarmeval import (Benchmark, EvaluationResult, FunctionSwarm, SimClock, Task, evaluate, read_events_jsonl,
                        render_trajectory, write_events_jsonl)
@@ -139,6 +141,55 @@ def test_report_shows_the_plain_evaluation_when_coordination_analysis_fails(tmp_
     assert "SWARM EVALUATION" in out
     assert ("swarmeval: coordination analysis failed: KeyError: 'span_x'; showing the plain evaluation "
             "(rerun with --no-coordination to skip it)") in err
+
+
+def test_report_names_the_failure_when_every_run_fails_coordination_analysis(tmp_path, capsys, monkeypatch):
+    saved = tmp_path / "runs.json"
+    evaluate(make_swarm, build_benchmark(2), trials=1, clock_factory=SimClock).runs.save(str(saved))
+
+    def odd(traj, **kw):
+        raise KeyError("span_x")
+
+    monkeypatch.setattr(sys.modules["swarmeval.evaluate"], "compute_coordination", odd)
+    html = tmp_path / "r.html"
+    assert main(["report", str(saved), "--html", str(html)]) == 1
+    out = capsys.readouterr().out
+    assert "Analysis Failed" in out and "2/2 runs: KeyError" in out
+    doc = html.read_text()
+    assert "coordination analysis failed on 2/2 runs: KeyError" in doc and "was skipped" not in doc
+
+
+def test_report_html_keeps_a_partial_coordination_failure(tmp_path, capsys, monkeypatch):
+    saved = tmp_path / "runs.json"
+    evaluate(make_swarm, build_benchmark(2), trials=1, clock_factory=SimClock).runs.save(str(saved))
+    ev = sys.modules["swarmeval.evaluate"]
+    real, calls = ev.compute_coordination, []
+
+    def flaky(traj, **kw):
+        calls.append(traj.run_id)
+        if len(calls) == 2:
+            raise KeyError("span_x")
+        return real(traj, **kw)
+
+    monkeypatch.setattr(ev, "compute_coordination", flaky)
+    html = tmp_path / "r.html"
+    with pytest.warns(UserWarning, match="failed on 1/2 runs"):
+        assert main(["report", str(saved), "--html", str(html)]) == 0
+    assert "1/2 runs: KeyError" in capsys.readouterr().out
+    doc = html.read_text()
+    assert "coordination analysis failed on 1/2 runs: KeyError" in doc and "was skipped" not in doc
+
+
+def test_demo_html_names_the_failure_when_every_run_fails_coordination_analysis(tmp_path, capsys, monkeypatch):
+    def odd(traj, **kw):
+        raise KeyError("span_x")
+
+    monkeypatch.setattr(sys.modules["swarmeval.evaluate"], "compute_coordination", odd)
+    html = tmp_path / "d.html"
+    assert main(["demo", "--trials", "1", "--html", str(html), "--out", str(tmp_path / "D")]) == 1
+    n = len(build_benchmark())
+    doc = html.read_text()
+    assert f"coordination analysis failed on {n}/{n} runs: KeyError" in doc and "was skipped" not in doc
 
 
 def test_compare_shows_the_plain_comparison_when_coordination_analysis_fails(tmp_path, capsys, monkeypatch):
