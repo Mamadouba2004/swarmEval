@@ -13,8 +13,10 @@ Redundancy needs "are these two texts saying the same thing?".  Two backends:
   pairs is capped (``max_pairs``) and ``truncated`` says when the cap hit.
 
 Anything with ``name``, ``threshold``, ``candidates(texts)`` and
-``scores(texts, pairs)`` can be passed instead; ``resolve_similarity`` turns a
-name, an import path (``"pkg.module:attr"``) or an instance into one.
+``scores(texts, pairs)`` can be passed instead, plus ``truncated`` (True when
+the max_pairs cap dropped candidate pairs; read as False when absent);
+``resolve_similarity`` turns a name, an import path (``"pkg.module:attr"``)
+or an instance into one.
 
 Classes:
 - Similarity: A similarity backend. ``candidates`` yields index pairs ``(i, j)`` with ``i < j`` worth scoring;
@@ -52,6 +54,7 @@ _WORD = re.compile(r"\w+")
 class Similarity(Protocol):
     name: str
     threshold: float
+    truncated: bool
 
     def candidates(self, texts: Sequence[str]) -> Iterable[Pair]:
         """Index pairs ``(i, j)`` with ``i < j`` worth scoring."""

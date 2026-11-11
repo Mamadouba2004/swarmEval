@@ -41,6 +41,13 @@ def fake_embed(texts):
     return [table[t] for t in texts]
 
 
+def test_similarity_protocol_declares_truncated():
+    from swarmeval.similarity import Similarity
+    assert Similarity.__annotations__.get("truncated") in (bool, "bool")
+    assert LexicalSimilarity().truncated is False
+    assert EmbeddingSimilarity(embed_fn=fake_embed).truncated is False
+
+
 def test_embedding_with_fake_embed_fn():
     calls = []
 
