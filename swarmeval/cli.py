@@ -166,15 +166,20 @@ def cmd_compare(args: argparse.Namespace) -> int:
     from .compare import compare
     base, cand = _load_runs_or_exit(args.baseline), _load_runs_or_exit(args.candidate)
     pricing = PricingTable.load(args.pricing) if args.pricing else None
+    kw = _analysis_kwargs(args)
+    code = 0
     try:
-        cmp = compare(base, cand, pricing=pricing, **_analysis_kwargs(args))
+        cmp = compare(base, cand, pricing=pricing, **kw)
     except ValueError as exc:
         raise SystemExit(f"swarmeval: {exc}")
+    except Exception as exc:  # every run failed the same way: compare what still holds
+        _analysis_failed(exc)
+        cmp, code = compare(base, cand, pricing=pricing, **{**kw, "coordination": False}), 1
     print(cmp.report())
     if args.out:
         cmp.save(args.out)
         print(f"\nwrote {args.out}")
-    return 0
+    return code
 
 
 def cmd_export(args: argparse.Namespace) -> int:

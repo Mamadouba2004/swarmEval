@@ -139,3 +139,20 @@ def test_report_shows_the_plain_evaluation_when_coordination_analysis_fails(tmp_
     assert "SWARM EVALUATION" in out
     assert ("swarmeval: coordination analysis failed: KeyError: 'span_x'; showing the plain evaluation "
             "(rerun with --no-coordination to skip it)") in err
+
+
+def test_compare_shows_the_plain_comparison_when_coordination_analysis_fails(tmp_path, capsys, monkeypatch):
+    from swarmeval import SimClock, evaluate
+    from swarmeval.examples.research_swarm import build_benchmark, make_swarm
+    saved = tmp_path / "runs.json"
+    evaluate(make_swarm, build_benchmark(2), trials=1, clock_factory=SimClock).runs.save(str(saved))
+
+    def odd(traj, **kw):
+        raise KeyError("span_x")
+
+    monkeypatch.setattr(sys.modules["swarmeval.evaluate"], "compute_coordination", odd)
+    assert main(["compare", str(saved), str(saved)]) == 1
+    out, err = capsys.readouterr()
+    assert out.strip()
+    assert ("swarmeval: coordination analysis failed: KeyError: 'span_x'; showing the plain evaluation "
+            "(rerun with --no-coordination to skip it)") in err
