@@ -27,7 +27,7 @@ from .diagnostics import (
                       register_smell,
                       summarize_diagnostics,
 )
-from .evaluate import AnalysisFailed, EfficiencySummary, EvaluationResult, analyze_runs, evaluate
+from .evaluate import AnalysisFailed, EfficiencySummary, EvaluationResult, analyze_runs, evaluate, load_result
 from .export import read_events_jsonl, write_events_jsonl
 from .graph import ExecutionGraph, build_graph, export_graph, to_dot, to_json, to_mermaid
 from .metrics import (
@@ -60,7 +60,7 @@ from .similarity import EmbeddingSimilarity, LexicalSimilarity, Similarity, reso
 __version__ = "0.1.0"
 
 __all__ = [
-    "evaluate", "analyze_runs", "EvaluationResult", "AnalysisFailed", "EfficiencySummary",
+    "evaluate", "analyze_runs", "load_result", "EvaluationResult", "AnalysisFailed", "EfficiencySummary",
     "Task", "Benchmark", "Trajectory", "Event", "EventType", "Span", "Artifact", "Evaluation",
     "RunContext", "AgentSpan", "Message", "LLMResult", "LLMCall", "ToolCall", "SimClock", "WallClock",
     "Swarm", "SwarmContext", "FunctionSwarm", "SwarmRunner", "RunInterrupted", "RunOptions", "RunSet",
