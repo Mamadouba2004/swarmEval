@@ -13,7 +13,7 @@ Phase 3  Ablation · failure injection · counterfactuals · confidence interval
 Phase 4  Architecture recommendations · validated optimization
 ```
 
-Pure Python 3.9+, no runtime dependencies. Optional Anthropic SDK adapter. The design charter is in [docs/DESIGN.md](docs/DESIGN.md); the full research write-up is in [research.md](research.md).
+Python 3.12+, no runtime dependencies. Optional Anthropic SDK adapter. The design charter is in [docs/DESIGN.md](docs/DESIGN.md); the full research write-up is in [research.md](research.md).
 
 ---
 
@@ -106,14 +106,16 @@ result.save("runs/qa.json")
 | `span.llm(fn, …)` / `span.llm_call(...)` | an LLM call with model, tokens (incl. prompt-cache reads/writes), cost, latency, prompt, `input_artifacts` |
 | `span.call_tool(name, fn, **args)` / `span.tool_call(...)` | a tool call with arguments, result, latency and status |
 | `await span.allm(...)` / `await span.acall_tool(...)` | the same for async functions (the sync versions raise if given one) |
-| `span.send(to, content, kind, artifacts)` / `span.receive()` | messages through a per-agent mailbox |
-| `span.produce(name, content)` / `span.consume(artifact)` | artifacts and who used them |
-| `span.wait(reason, seconds)` / `span.waiting(reason)` | explicit waiting |
+| `span.send(to, content, kind, artifacts, reply_to=)` / `span.receive()` | messages through a per-agent mailbox; each message gets an id, and `receive()` records a `message_receive` event per message read (`inbox()` only peeks) |
+| `span.produce(name, content, derived_from=[...])` / `span.consume(artifact)` | artifacts, what they were made from, and who used them |
+| `span.wait(reason, seconds, on=...)` / `span.waiting(reason, on=...)` | explicit waiting, optionally on Messages, Artifacts or agent ids |
 | `span.note(text)` / `span.error(msg)` | annotations and errors |
 
 Return an `LLMResult(text, input_tokens, output_tokens, model)` from the function you pass to `span.llm` to record real usage; otherwise tokens are estimated from the prompt (`prompt=`, or the function's arguments) and the output, and flagged as estimated. A lone `prompt=` is passed to a function that takes an argument, so `span.llm(fn, prompt=p)` works. Models missing from the pricing table get a cost of `unknown`: they are left out of totals (marked `*`), never counted as `$0`. Only dated or provider-prefixed forms of a listed model id share its price.
 
 **Anthropic SDK**: `swarmeval.integrations.anthropic.instrument_client(client)` records every `messages.create` / `beta.messages.create` made inside an agent span with real usage (sync or async client); inside `span.llm` it fills in that call rather than recording it twice. `anthropic_llm(client, model)` returns a prompt → `LLMResult` callable for `span.llm` (async for an async client, for `span.allm`).
+
+**Provenance** (schema v2, `trajectory.metadata["schema_version"] == 2`): the coordination analysis follows messages from send to receive and artifacts from producer to consumer. Carrying an artifact in a message is transport, not use; use is `consume(...)`, an LLM/tool call's `input_artifacts`, or another artifact's `derived_from`. `derived_from` left out means "not recorded" (`[]` means "made from nothing"). Phase 1 run files still load; their message edges are marked inferred.
 
 `evaluate()` also accepts a `Swarm` class, a bare `run(task, ctx)` function (sync or `async`) or a zero-argument factory. Use `clock_factory=SimClock` for simulated swarms that advance a virtual clock. An `evaluator=` passed to `evaluate()` overrides the task and benchmark evaluators. `capture_text=False` keeps only short previews of prompts, outputs, tool arguments and artifacts in everything recorded and saved.
 
@@ -138,6 +140,7 @@ Built-in evaluators: `exact_match`, `contains_all` / `contains_any` (with `forbi
 |---|---|
 | **Performance** | success rate, mean score, constraint pass rate, per-task and per-trial breakdown, crashed runs |
 | **Efficiency** | input/output tokens, LLM and tool call counts, messages, cost (pricing table), cost per successful task, wall clock, aggregate agent time, waiting time, per-agent tokens/cost/calls/time |
+| **Coordination** (Phase 2, in progress) | execution graph (`build_graph`: agent graph + work-unit DAG), provenance coverage, per-agent utilization shares, observed contribution (final-output lineage, artifacts consumed by others, `dead` only when provenance coverage is complete) -- `result.per_run_coordination`, `result.coordination` |
 
 Repeated trials use seeds derived from `(seed, task, trial)` so a run set is reproducible. Means and spreads are reported; confidence intervals are Phase 3.
 
@@ -185,7 +188,8 @@ swarmeval/
   recorder.py      RunContext / AgentSpan: the agent interface and recorder
   runner.py        Swarm, SwarmRunner, RunSet, repeated trials, seeds
   evaluators.py    deterministic evaluators with JSON specs
-  metrics/         performance, efficiency
+  graph/           execution graph: agent graph and work-unit DAG
+  metrics/         performance, efficiency, contribution, coordination
   compare.py       run-to-run comparison
   report/          text report, comparison report and trajectory trace
   export/          JSONL and Parquet events
@@ -204,4 +208,4 @@ docker run --rm -v "$PWD":/w -w /w python:3.12-slim \
   sh -c 'pip install -q -e ".[dev,parquet]" && pytest -q'
 ```
 
-Swap the image tag (e.g. `python:3.9-slim`) to check the oldest supported Python. The Parquet tests skip when `pyarrow` is not installed.
+The Parquet tests skip when `pyarrow` is not installed.

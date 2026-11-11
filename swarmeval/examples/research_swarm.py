@@ -155,7 +155,7 @@ class ResearchSwarm(Swarm):
                             found.append(fact)
                 notes = "\n".join(found) if found else "No reliable information found."
                 self._llm(ctx, agent, f"Summarise findings:\n{notes}", 350, output=notes)
-                art = agent.produce(f"notes_{r[-1]}", notes)
+                art = agent.produce(f"notes_{r[-1]}", notes, derived_from=[])  # from search results only
                 agent.send("coordinator", notes, kind="result", artifacts=[art])
 
         ctx.parallel(*(partial(research, r) for r in researchers))
@@ -182,7 +182,7 @@ class ResearchSwarm(Swarm):
             critique = ("Flagged as unsupported: " + "; ".join(flagged)) if flagged else "No issues found."
             self._llm(ctx, critic, "Review these findings for errors:\n" + "\n".join(facts), 400,
                       input_artifacts=arts, output=critique)
-            critique_art = critic.produce("critique", critique)
+            critique_art = critic.produce("critique", critique, derived_from=arts)
             critic.send("coordinator", critique, kind="feedback", artifacts=arts + [critique_art])
 
         # 5. coordinator relays to synthesizer --------------------------------
@@ -208,7 +208,7 @@ class ResearchSwarm(Swarm):
             answer = f"Brief on {world['name']}:\n" + "\n".join(f"- {f}" for f in dict.fromkeys(kept))
             self._llm(ctx, synth, "Write the brief from:\n" + "\n".join(kept), 700, extra_context_tokens=9000,
                       input_artifacts=arts, output=answer)
-            final_art = synth.produce("final_brief", answer)
+            final_art = synth.produce("final_brief", answer, derived_from=arts)
         ctx.set_output(answer, artifacts=[final_art])
         return answer
 

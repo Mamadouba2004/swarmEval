@@ -18,6 +18,12 @@ from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional
 
 
+# Version of the recorded data, stored as ``trajectory.metadata["schema_version"]``.
+# Absent means Phase 1 data: no MESSAGE_RECEIVE events, message ids or
+# ``derived_from``, so analyses must treat those as unknown rather than absent.
+SCHEMA_VERSION = 2
+
+
 # --------------------------------------------------------------------------- #
 # Enumerations
 # --------------------------------------------------------------------------- #
@@ -29,6 +35,7 @@ class EventType(str, Enum):
     LLM_CALL = "llm_call"
     TOOL_CALL = "tool_call"
     MESSAGE = "message"
+    MESSAGE_RECEIVE = "message_receive"  # a message was taken from the receiver's mailbox
     ARTIFACT = "artifact"          # an artifact was produced
     ARTIFACT_USE = "artifact_use"  # an artifact was consumed
     WAIT = "wait"
@@ -157,6 +164,10 @@ class Event:
     output_artifacts: List[str] = field(default_factory=list)
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Message identity (schema v2): MESSAGE and MESSAGE_RECEIVE events of one
+    # message share ``message_id``; ``reply_to`` names the message answered.
+    message_id: Optional[str] = None
+    reply_to: Optional[str] = None
 
     @property
     def end_timestamp(self) -> float:
@@ -197,6 +208,9 @@ class Artifact:
     tokens: int
     event_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Ids of the artifacts this one was made from.  ``None`` = not recorded
+    # (Phase 1 data, or the producer did not say); ``[]`` = recorded, no inputs.
+    derived_from: Optional[List[str]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

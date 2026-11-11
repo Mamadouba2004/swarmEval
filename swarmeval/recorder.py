@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, Iterable, Iterator, List, Optional, Tuple, Union
 
 from .pricing import DEFAULT_PRICING, PricingTable
-from .schema import (Artifact, Event, EventType, Span, Status, Task, TextPolicy, Trajectory,
+from .schema import (SCHEMA_VERSION, Artifact, Event, EventType, Span, Status, Task, TextPolicy, Trajectory,
                      content_hash, estimate_tokens, new_id, preview, to_text)
 
 
@@ -125,6 +125,7 @@ class Message:
     tokens: int
     event_id: str
     metadata: Dict[str, Any] = field(default_factory=dict)
+    reply_to: Optional[str] = None     # message_id of the message this one answers
 
 
 @dataclass
@@ -154,6 +155,7 @@ class LLMCall:
         self.prompt = prompt
         self.output: Any = None
         self.metadata: Dict[str, Any] = {}
+        self.event_id = new_id("ev")   # fixed up front so calls nested inside can point to it
 
 
 class ToolCall:
@@ -165,16 +167,58 @@ class ToolCall:
         self.input_artifacts = input_artifacts
         self.result: Any = None
         self.metadata: Dict[str, Any] = {}
+        self.event_id = new_id("ev")
 
 
 _current_span: contextvars.ContextVar = contextvars.ContextVar("swarmeval_current_span", default=None)
 # The LLM call being recorded right now, so client instrumentation can fill
 # it in instead of recording the same API call a second time.
 _current_llm_call: contextvars.ContextVar = contextvars.ContextVar("swarmeval_current_llm_call", default=None)
+# (span_id, event_id) of the innermost LLM/tool call running in this context.
+# A call started inside another call of the same span records the outer one as
+# ``metadata["within_call"]``: the graph needs to tell nesting (a tool run by
+# an LLM call) from ``gather``ed sibling calls, whose intervals can look alike.
+_current_call: contextvars.ContextVar = contextvars.ContextVar("swarmeval_current_call", default=None)
+
+
+def _enter_call(span: "AgentSpan", call: Union["LLMCall", "ToolCall"]) -> contextvars.Token:
+    outer = _current_call.get()
+    if outer is not None and outer[0] == span.span_id:
+        call.metadata["within_call"] = outer[1]
+    return _current_call.set((span.span_id, call.event_id))
 
 
 def _ids(artifacts: Iterable[Union[Artifact, str]]) -> List[str]:
     return [a.artifact_id if isinstance(a, Artifact) else str(a) for a in artifacts]
+
+
+WaitTarget = Union[Message, Artifact, str]
+
+
+def _wait_refs(on: Union[WaitTarget, Iterable[WaitTarget], None]) -> Tuple[List[str], Dict[str, Any]]:
+    """What a wait was for: artifact ids (recorded as ``input_artifacts``) and
+    metadata naming the awaited messages and agents.  A plain string is an
+    agent id.  Only non-empty keys are written, so a wait without ``on`` is
+    recorded exactly as in Phase 1."""
+    if on is None:
+        return [], {}
+    items = [on] if isinstance(on, (Message, Artifact, str)) else list(on)
+    arts: List[str] = []
+    msgs: List[str] = []
+    agents: List[str] = []
+    for x in items:
+        if isinstance(x, Message):
+            msgs.append(x.message_id)
+        elif isinstance(x, Artifact):
+            arts.append(x.artifact_id)
+        else:
+            agents.append(str(x))
+    meta: Dict[str, Any] = {}
+    if msgs:
+        meta["on_messages"] = msgs
+    if agents:
+        meta["on_agents"] = agents
+    return arts, meta
 
 
 def _reject_awaitable(result: Any, sync_name: str, async_name: str) -> None:
@@ -223,6 +267,9 @@ class RunContext:
         self.trajectory = Trajectory(run_id=run_id or new_id("run"), task_id=task.task_id, task=task,
                                      seed=seed, trial=trial)
         self.trajectory.metadata.update(self.text_policy.to_metadata())
+        # Marks data recorded with message ids, receive events and derived_from;
+        # absent on Phase 1 trajectories.
+        self.trajectory.metadata["schema_version"] = SCHEMA_VERSION
         self._lock = threading.RLock()
         self._mailbox: Dict[str, List[Message]] = {}
         self._error_origin: Dict[int, Tuple[BaseException, str]] = {}
@@ -282,7 +329,8 @@ class RunContext:
             fields.setdefault("agent_id", span.agent_id)
             fields.setdefault("span_id", span.span_id)
             fields.setdefault("parent_event_id", span.start_event_id)
-        ev = Event(event_id=new_id("ev"), run_id=self.trajectory.run_id, task_id=self.task.task_id,
+        event_id = fields.pop("event_id", None) or new_id("ev")
+        ev = Event(event_id=event_id, run_id=self.trajectory.run_id, task_id=self.task.task_id,
                    event_type=et, **fields)
         with self._lock:
             self.trajectory.events.append(ev)
@@ -350,30 +398,59 @@ class RunContext:
     # -- messaging ------------------------------------------------------------
     def send(self, sender: str, receiver: str, content: Any, kind: str = "information",
              artifacts: Iterable[Union[Artifact, str]] = (), _span: Optional["AgentSpan"] = None,
-             **metadata: Any) -> Message:
-        """Record a message and deliver it to the receiver's mailbox."""
+             reply_to: Union[Message, str, None] = None, **metadata: Any) -> Message:
+        """Record a message and deliver it to the receiver's mailbox.
+        ``reply_to`` (a Message or its id) marks it as an answer."""
         art_ids = _ids(artifacts)
         tokens = estimate_tokens(content) + sum(
             self.trajectory.artifacts[a].tokens for a in art_ids if a in self.trajectory.artifacts)
+        reply_id = reply_to.message_id if isinstance(reply_to, Message) else reply_to
+        # The id is made before recording so the MESSAGE event carries it and
+        # the receive event can be matched to it.
+        msg_id = new_id("msg")
         span = _span if _span is not None else _current_span.get()
+        if span is not None and span.agent_id != sender:
+            span = None  # another agent's span is active: the send is not part of it
+        # an explicit parent stops record() falling back to the active span
         ev = self.record(EventType.MESSAGE, _span=span, agent_id=sender, span_id=span.span_id if span else None,
+                         parent_event_id=span.start_event_id if span else None,
                          sender=sender, receiver=receiver, kind=kind, content=self._text(content),
                          content_tokens=tokens, content_hash=content_hash(content),
-                         input_artifacts=art_ids, metadata=dict(metadata))
-        msg = Message(new_id("msg"), sender, receiver, content, kind, art_ids, ev.timestamp, tokens, ev.event_id,
-                      dict(metadata))
+                         input_artifacts=art_ids, metadata=dict(metadata), message_id=msg_id, reply_to=reply_id)
+        msg = Message(msg_id, sender, receiver, content, kind, art_ids, ev.timestamp, tokens, ev.event_id,
+                      dict(metadata), reply_id)
         with self._lock:
             self._mailbox.setdefault(receiver, []).append(msg)
         return msg
 
-    def receive(self, agent_id: str) -> List[Message]:
-        """Drain the mailbox of ``agent_id``."""
+    def receive(self, agent_id: str, _span: Optional["AgentSpan"] = None) -> List[Message]:
+        """Drain the mailbox of ``agent_id``, recording one MESSAGE_RECEIVE per
+        message.  The receive event lists the message's artifacts as
+        ``input_artifacts`` because they arrived, not because they were used:
+        use is recorded by ``consume`` or by an LLM/tool call's inputs."""
         with self._lock:
             msgs = self._mailbox.get(agent_id, [])
             self._mailbox[agent_id] = []
+        span = _span if _span is not None else _current_span.get()
+        if span is not None and span.agent_id != agent_id:
+            span = None  # another agent's span is active: the read is not part of it
+        for m in msgs:
+            if isinstance(self.clock, SimClock) and self.clock.now() < m.timestamp:
+                # each parallel branch has its own simulated time: a read cannot precede the send
+                self.clock.set(m.timestamp)
+            now = self.now()
+            # delay is clamped: with threads and a wall clock the read can be
+            # stamped marginally before the send
+            self.record(EventType.MESSAGE_RECEIVE, _span=span, agent_id=agent_id,
+                        span_id=span.span_id if span else None,
+                        parent_event_id=span.start_event_id if span else None, sender=m.sender, receiver=agent_id,
+                        kind=m.kind, content_tokens=0, input_artifacts=list(m.artifacts),
+                        message_id=m.message_id, reply_to=m.reply_to, timestamp=now,
+                        metadata={"delay_s": max(0.0, now - m.timestamp)})
         return msgs
 
     def inbox(self, agent_id: str) -> List[Message]:
+        """Peek at the mailbox without draining it; records nothing."""
         with self._lock:
             return list(self._mailbox.get(agent_id, []))
 
@@ -523,6 +600,7 @@ class AgentSpan:
         call.metadata.update(metadata)
         t0 = ctx.now()
         token = _current_llm_call.set(call)
+        call_token = _enter_call(self, call)
         try:
             yield call
         except Exception as exc:
@@ -531,6 +609,7 @@ class AgentSpan:
             ctx._mark_exception(exc, ev.event_id)
             raise
         finally:
+            _current_call.reset(call_token)
             _current_llm_call.reset(token)
         self._record_llm(call, t0, Status.SUCCESS.value, None)
 
@@ -550,7 +629,8 @@ class AgentSpan:
                           content=ctx._text(call.output) if call.output is not None else None,
                           content_tokens=estimate_tokens(call.output) if call.output is not None else 0,
                           content_hash=content_hash(call.output) if call.output is not None else None,
-                          input_artifacts=list(call.input_artifacts), metadata=meta, timestamp=t0)
+                          input_artifacts=list(call.input_artifacts), metadata=meta, timestamp=t0,
+                          event_id=call.event_id)
 
     @staticmethod
     def _llm_args(fn: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any],
@@ -623,6 +703,7 @@ class AgentSpan:
         ctx = self.ctx
         call = ToolCall(name, args, _ids(input_artifacts))
         t0 = ctx.now()
+        call_token = _enter_call(self, call)
         try:
             yield call
         except Exception as exc:
@@ -630,6 +711,8 @@ class AgentSpan:
             ev = self._record_tool(call, t0, Status.ERROR.value, f"{type(exc).__name__}: {exc}")
             ctx._mark_exception(exc, ev.event_id)
             raise
+        finally:
+            _current_call.reset(call_token)
         self._record_tool(call, t0, Status.SUCCESS.value, None)
 
     def _record_tool(self, call: ToolCall, t0: float, status: str, error: Optional[str]) -> Event:
@@ -640,7 +723,8 @@ class AgentSpan:
                           content=ctx._text(call.result) if call.result is not None else None,
                           content_tokens=estimate_tokens(call.result) if call.result is not None else 0,
                           content_hash=content_hash(call.result) if call.result is not None else None,
-                          input_artifacts=list(call.input_artifacts), metadata=dict(call.metadata), timestamp=t0)
+                          input_artifacts=list(call.input_artifacts), metadata=dict(call.metadata), timestamp=t0,
+                          event_id=call.event_id)
 
     def call_tool(self, name: str, fn: Callable[..., Any], *args: Any,
                   input_artifacts: Iterable[Union[Artifact, str]] = (), **kwargs: Any) -> Any:
@@ -665,24 +749,31 @@ class AgentSpan:
 
     # -- messaging ------------------------------------------------------------
     def send(self, receiver: str, content: Any, kind: str = "information",
-             artifacts: Iterable[Union[Artifact, str]] = (), **metadata: Any) -> Message:
+             artifacts: Iterable[Union[Artifact, str]] = (), reply_to: Union[Message, str, None] = None,
+             **metadata: Any) -> Message:
         return self.ctx.send(self.agent_id, receiver, content, kind=kind, artifacts=artifacts, _span=self,
-                             **metadata)
+                             reply_to=reply_to, **metadata)
 
     def receive(self) -> List[Message]:
-        return self.ctx.receive(self.agent_id)
+        return self.ctx.receive(self.agent_id, _span=self)
 
     def inbox(self) -> List[Message]:
         return self.ctx.inbox(self.agent_id)
 
     # -- artifacts ------------------------------------------------------------
-    def produce(self, name: str, content: Any, **metadata: Any) -> Artifact:
+    def produce(self, name: str, content: Any, derived_from: Optional[Iterable[Union[Artifact, str]]] = None,
+                **metadata: Any) -> Artifact:
+        """Record an artifact.  ``derived_from`` lists the artifacts it was made
+        from (``[]`` = from none); leaving it out records "unknown", which the
+        lineage analysis then approximates from what the span consumed."""
         ctx = self.ctx
+        sources = None if derived_from is None else _ids(derived_from)
         art = Artifact(new_id("art"), name, self.agent_id, self.span_id, ctx.now(), content,
-                       content_hash(content), estimate_tokens(content), None, dict(metadata))
+                       content_hash(content), estimate_tokens(content), None, dict(metadata), sources)
         ev = ctx.record(EventType.ARTIFACT, _span=self, kind=name, content=ctx._text(content),
                         content_tokens=art.tokens, content_hash=art.content_hash,
-                        output_artifacts=[art.artifact_id], metadata=dict(metadata))
+                        input_artifacts=list(sources or []), output_artifacts=[art.artifact_id],
+                        metadata=dict(metadata), timestamp=art.produced_at)
         art.event_id = ev.event_id
         with ctx._lock:
             ctx.trajectory.artifacts[art.artifact_id] = art
@@ -696,19 +787,24 @@ class AgentSpan:
         return art
 
     # -- waiting --------------------------------------------------------------
-    def wait(self, reason: str, seconds: float) -> None:
+    def wait(self, reason: str, seconds: float,
+             on: Union[WaitTarget, Iterable[WaitTarget], None] = None) -> None:
+        """Record a wait.  ``on`` names what was awaited: Messages, Artifacts
+        and/or agent ids, alone or in a list."""
+        arts, meta = _wait_refs(on)
         t0 = self.ctx.now()
         self.ctx.clock.sleep(seconds)
-        self.ctx.record(EventType.WAIT, _span=self, kind=reason,
+        self.ctx.record(EventType.WAIT, _span=self, kind=reason, input_artifacts=arts, metadata=meta,
                         latency_ms=(self.ctx.now() - t0) * 1000.0, timestamp=t0)
 
     @contextmanager
-    def waiting(self, reason: str) -> Iterator[None]:
+    def waiting(self, reason: str, on: Union[WaitTarget, Iterable[WaitTarget], None] = None) -> Iterator[None]:
+        arts, meta = _wait_refs(on)
         t0 = self.ctx.now()
         try:
             yield
         finally:
-            self.ctx.record(EventType.WAIT, _span=self, kind=reason,
+            self.ctx.record(EventType.WAIT, _span=self, kind=reason, input_artifacts=arts, metadata=meta,
                             latency_ms=(self.ctx.now() - t0) * 1000.0, timestamp=t0)
 
     # -- misc -----------------------------------------------------------------

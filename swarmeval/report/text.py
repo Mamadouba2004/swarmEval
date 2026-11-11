@@ -212,6 +212,8 @@ def render_trajectory(traj: Trajectory, max_events: int = 200) -> str:
             detail = f"{ev.tool_name}({preview(ev.tool_args, 60)})  {ev.duration_s:.2f}s"
         elif et == EventType.MESSAGE.value:
             detail = f"{ev.sender} → {ev.receiver}  [{ev.kind}]  {ev.content_tokens} tok"
+        elif et == EventType.MESSAGE_RECEIVE.value:
+            detail = f"reads {ev.sender} → {ev.receiver}  [{ev.kind}]  after {ev.metadata.get('delay_s', 0.0):.2f}s"
         elif et == EventType.ARTIFACT.value:
             detail = f"{ev.kind}  {ev.content_tokens} tok"
         elif et == EventType.ARTIFACT_USE.value:

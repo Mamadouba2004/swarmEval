@@ -79,6 +79,8 @@ Every execution is a graph. Nodes carry timing, model, tokens, tools, inputs, ou
 
 Dependencies are inferred from what was recorded. Unrecorded channels make the DAG under-count dependencies and over-estimate parallelism.
 
+Provenance recorded since schema v2 (`trajectory.metadata["schema_version"] = 2`; absent = Phase 1 data): message ids on `message` events and a `message_receive` event per message read (`reply_to` links answers), `Artifact.derived_from` (`None` = not recorded, `[]` = no inputs), `wait(..., on=)` targets, and `metadata["within_call"]` on a call made inside another call of its span (so nesting is not confused with gathered calls). DAG rules: nested calls are excluded; within a span each unit depends on the *finished frontier* before it, so overlapping calls are not chained; child spans connect to their parent's frontier and back; messages link send → receive (or, without a receive event — Phase 1 data, or a message only read with `inbox()` — → the receiver's next unit, flagged inferred); artifacts link producer → genuine consumption only (forwarding is not consumption); waits link to what they waited on. `Coverage` reports how much of this was recorded.
+
 ## 5. Swarm smells (`diagnostics/smells.py`)
 
 ESLint for agent architectures. Each smell is a *hypothesis from trajectory evidence*, reported as observation → hypothesis → intervention to test:
@@ -127,7 +129,7 @@ Task = input, expected behaviour, success criteria, constraints, evaluator spec,
 | Phase | Deliverable | Status |
 |---|---|---|
 | 1 Observability & evaluation | reproducible trace + evaluation report | **done** (`schema`, `recorder`, `runner`, `evaluators`, `metrics/performance`, `metrics/efficiency`, `report/text`, `export/jsonl`, `export/parquet`, `compare` (run-to-run comparison, research.md §27), `integrations/anthropic`, CLI incl. `export` and `compare`); sync and async swarms |
-| 2 Coordination analysis | explain where the swarm is inefficient and why | planned (`graph/`, `metrics/coordination`, `diagnostics/`) |
+| 2 Coordination analysis | explain where the swarm is inefficient and why | in progress: provenance schema v2, `graph/builder`, `metrics/contribution` (utilization, observed contribution), `metrics/coordination` done; communication, redundancy, dependencies, smells and reports planned (`diagnostics/`) |
 | 3 Causal & research features | estimate which components actually matter | planned (`causal/`, confidence intervals in `stats`, `validity`) |
 | 4 Optimization | experimentally validated architecture improvements | planned (`optimize/`) |
 

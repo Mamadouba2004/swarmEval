@@ -15,7 +15,7 @@ import sys
 from typing import Any, Callable, List, Optional
 
 from . import __version__
-from .evaluate import EvaluationResult, analyze_runs, evaluate, load_runset
+from .evaluate import AnalysisFailed, EvaluationResult, analyze_runs, evaluate, load_runset
 from .export import export_events
 from .export.jsonl import write_events_jsonl
 from .pricing import PricingTable
@@ -56,9 +56,22 @@ def _write_outputs(result: EvaluationResult, out: Optional[str]) -> None:
     print(f"\nwrote {out}/{result.label}.json and {out}/{result.label}.events.jsonl")
 
 
+def _write_plain_evaluation(exc: AnalysisFailed, out: Optional[str]) -> int:
+    print(exc.result.report())
+    _write_outputs(exc.result, out)
+    cause = exc.__cause__
+    done = f"written to {out}" if out else "shown"
+    print(f"swarmeval: coordination analysis failed: {type(cause).__name__}: {cause}; plain evaluation {done}",
+          file=sys.stderr)
+    return 1
+
+
 def cmd_demo(args: argparse.Namespace) -> int:
     from .examples.research_swarm import build_benchmark, make_swarm
-    result = evaluate(make_swarm, build_benchmark(), trials=args.trials, clock_factory=SimClock, progress=True)
+    try:
+        result = evaluate(make_swarm, build_benchmark(), trials=args.trials, clock_factory=SimClock, progress=True)
+    except AnalysisFailed as exc:
+        return _write_plain_evaluation(exc, args.out)
     print(result.report())
     if args.trace:
         print()
@@ -71,8 +84,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     swarm = _load_obj(args.swarm)
     bench = _load_benchmark(args.benchmark)
     pricing = PricingTable.load(args.pricing) if args.pricing else None
-    result = evaluate(swarm, bench, trials=args.trials, seed=args.seed, clock_factory=_clock_factory(args.clock),
-                      label=args.label, progress=True, pricing=pricing, capture_text=not args.no_capture_text)
+    try:
+        result = evaluate(swarm, bench, trials=args.trials, seed=args.seed, clock_factory=_clock_factory(args.clock),
+                          label=args.label, progress=True, pricing=pricing, capture_text=not args.no_capture_text)
+    except AnalysisFailed as exc:
+        return _write_plain_evaluation(exc, args.out)
     print(result.report())
     _write_outputs(result, args.out)
     return 0
@@ -85,17 +101,27 @@ def _load_runs_or_exit(path: str):
         raise SystemExit(f"swarmeval: {exc}")
 
 
+def _analysis_failed(exc: Exception) -> None:
+    print(f"swarmeval: coordination analysis failed: {type(exc).__name__}: {exc}; showing the plain evaluation "
+          "(rerun with --no-coordination to skip it)", file=sys.stderr)
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     runs = _load_runs_or_exit(args.path)
     pricing = PricingTable.load(args.pricing) if args.pricing else None
-    result = analyze_runs(runs, pricing=pricing)
+    code = 0
+    try:
+        result = analyze_runs(runs, pricing=pricing)
+    except Exception as exc:  # every run failed the same way: the runs are on disk, show what still holds
+        _analysis_failed(exc)
+        result, code = analyze_runs(runs, pricing=pricing, coordination=False), 1
     print(result.report())
     if args.trace is not None:
         if not 0 <= args.trace < len(runs):
             raise SystemExit(f"swarmeval: --trace {args.trace} out of range (file has {len(runs)} runs)")
         print()
         print(render_trajectory(runs.trajectories[args.trace]))
-    return 0
+    return code
 
 
 def cmd_compare(args: argparse.Namespace) -> int:

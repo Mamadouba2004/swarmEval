@@ -50,6 +50,23 @@ def test_spans_llm_tool_message_artifact_are_recorded():
     assert types[0] == EventType.RUN_START.value and types[-1] == EventType.RUN_END.value
 
 
+def test_receive_for_another_agent_inside_a_span_has_no_span_or_parent():
+    ctx = make_ctx()
+    ctx.send("c", "b", "x")
+    with ctx.agent("a"):
+        ctx.receive("b")
+    (ev,) = ctx.finish().events_of(EventType.MESSAGE_RECEIVE)
+    assert ev.agent_id == "b" and ev.span_id is None and ev.parent_event_id is None
+
+
+def test_send_for_another_agent_inside_a_span_has_no_span_or_parent():
+    ctx = make_ctx()
+    with ctx.agent("a"):
+        ctx.send("b", "c", "x")
+    (ev,) = ctx.finish().events_of(EventType.MESSAGE)
+    assert ev.agent_id == "b" and ev.span_id is None and ev.parent_event_id is None
+
+
 def test_llm_without_usage_falls_back_to_estimates():
     ctx = make_ctx()
     ctx.start()

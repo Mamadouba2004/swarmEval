@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
+import warnings
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from .metrics.coordination import (CoordinationMetrics, CoordinationSummary, compute_coordination,
+                                   summarize_coordination)
 from .metrics.efficiency import EfficiencyMetrics, compute_efficiency
 from .metrics.performance import PerformanceMetrics, compute_performance
 from .pricing import PricingTable
@@ -96,14 +99,24 @@ def summarize_efficiency(trajectories: Sequence[Trajectory], effs: Sequence[Effi
 
 
 class EvaluationResult:
-    """Performance and efficiency of one swarm on one benchmark."""
+    """Performance, efficiency and (when computed) coordination of one swarm
+    on one benchmark.  ``per_run_coordination`` / ``coordination`` are
+    ``None`` when the analysis was switched off; a run whose analysis failed
+    has ``None`` in ``per_run_coordination`` and its error, by run id, in
+    ``coordination_errors``."""
 
     def __init__(self, runs: RunSet, per_run: List[EfficiencyMetrics], performance: PerformanceMetrics,
-                 efficiency: EfficiencySummary) -> None:
+                 efficiency: EfficiencySummary,
+                 per_run_coordination: Optional[List[Optional[CoordinationMetrics]]] = None,
+                 coordination: Optional[CoordinationSummary] = None,
+                 coordination_errors: Optional[Dict[str, str]] = None) -> None:
         self.runs = runs
         self.per_run = per_run
         self.performance = performance
         self.efficiency = efficiency
+        self.per_run_coordination = per_run_coordination
+        self.coordination = coordination
+        self.coordination_errors = coordination_errors or {}
 
     @property
     def label(self) -> str:
@@ -148,15 +161,24 @@ class EvaluationResult:
         }
 
     def to_dict(self, include_runs: bool = False) -> Dict[str, Any]:
+        coord: List[Optional[CoordinationMetrics]] = (list(self.per_run_coordination)
+                                                      if self.per_run_coordination is not None
+                                                      else [None] * len(self.per_run))
         d = {
             "summary": self.summary(),
             "performance": self.performance.to_dict(),
             "efficiency": self.efficiency.to_dict(),
+            "coordination": self.coordination.to_dict() if self.coordination is not None else None,
+            "coordination_errors": dict(self.coordination_errors),
             "per_run": [{"run_id": t.run_id, "task_id": t.task_id, "trial": t.trial, "status": t.status,
                          "success": t.succeeded, "score": t.score, "cost_usd": e.cost_usd,
                          "tokens": e.total_tokens, "llm_calls": e.llm_calls, "tool_calls": e.tool_calls,
-                         "wall_clock_s": e.wall_clock_s}
-                        for t, e in zip(self.runs.trajectories, self.per_run)],
+                         "wall_clock_s": e.wall_clock_s,
+                         # None (not []) when coordination was not computed
+                         "dead_agents": c.dead_agents if c is not None else None,
+                         "message_receive_coverage": (c.coverage.message_receive_coverage
+                                                      if c is not None else None)}
+                        for t, e, c in zip(self.runs.trajectories, self.per_run, coord)],
         }
         if include_runs:
             d["runs"] = self.runs.to_dict()
@@ -182,6 +204,17 @@ class EvaluationResult:
                 f"cost={cost})")
 
 
+class AnalysisFailed(Exception):
+    """Raised by ``evaluate()`` when the analysis fails after the runs have
+    executed.  ``runs`` keeps the trajectories and ``result`` is the plain
+    evaluation (``coordination=False``); the original error is ``__cause__``."""
+
+    def __init__(self, message: str, runs: RunSet, result: EvaluationResult) -> None:
+        super().__init__(message)
+        self.runs = runs
+        self.result = result
+
+
 def load_runset(path: str) -> RunSet:
     """Load trajectories from a saved RunSet or a saved EvaluationResult.
     Raises ``ValueError`` for a result saved without its trajectories."""
@@ -194,14 +227,43 @@ def load_runset(path: str) -> RunSet:
     raise ValueError(f"{path} has no trajectories; save with include_runs=True to reload")
 
 
-def analyze_runs(runs: RunSet, pricing: Optional[PricingTable] = None) -> EvaluationResult:
+def analyze_runs(runs: RunSet, pricing: Optional[PricingTable] = None, coordination: bool = True,
+                 similarity: Any = None, smell_config: Any = None) -> EvaluationResult:
     """Recompute the evaluation from trajectories (e.g. a saved RunSet).
     With ``pricing``, every LLM call is re-priced from its recorded model and
-    token counts instead of using the cost stored at run time."""
+    token counts instead of using the cost stored at run time.
+    ``coordination=False`` skips the execution-graph analysis.  A run whose
+    analysis fails is left out of the coordination summary with a warning;
+    when two or more runs all fail with the same exception type, it is raised."""
     per_run = [compute_efficiency(t, pricing) for t in runs.trajectories]
     performance = compute_performance(runs.trajectories, per_run)
     efficiency = summarize_efficiency(runs.trajectories, per_run)
-    return EvaluationResult(runs, per_run, performance, efficiency)
+    per_run_coord: Optional[List[Optional[CoordinationMetrics]]] = None
+    coord_summary: Optional[CoordinationSummary] = None
+    errors: Dict[str, str] = {}
+    first_exc: Optional[Exception] = None
+    kinds: set[type] = set()
+    if coordination:
+        per_run_coord = []
+        for t, e in zip(runs.trajectories, per_run):
+            try:
+                cm: Optional[CoordinationMetrics] = compute_coordination(
+                    t, similarity=similarity, smell_config=smell_config, efficiency=e)
+            except Exception as exc:  # an odd trace must not cost the plain evaluation
+                cm = None
+                errors[t.run_id] = f"{type(exc).__name__}: {exc}"
+                first_exc = first_exc or exc
+                kinds.add(type(exc))
+            per_run_coord.append(cm)
+        done = [cm for cm in per_run_coord if cm is not None]
+        if first_exc is not None:
+            if not done and len(per_run_coord) > 1 and len(kinds) == 1:
+                raise first_exc  # every run, one cause: e.g. a missing optional dependency, not an odd trace
+            warnings.warn(f"coordination analysis failed on {len(per_run_coord) - len(done)}/{len(per_run_coord)} "
+                          f"runs: {type(first_exc).__name__}: {first_exc}", stacklevel=2)
+        coord_summary = summarize_coordination(done) if done else None
+    return EvaluationResult(runs, per_run, performance, efficiency, per_run_coordination=per_run_coord,
+                            coordination=coord_summary, coordination_errors=errors)
 
 
 def evaluate(swarm: Any, benchmark: Benchmark, trials: int = 1, seed: int = 0, evaluator: Any = None,
@@ -220,4 +282,8 @@ def evaluate(swarm: Any, benchmark: Benchmark, trials: int = 1, seed: int = 0, e
                       progress=progress, raise_errors=raise_errors, on_run=on_run, capture_text=capture_text,
                       max_text_chars=max_text_chars)
     runs = SwarmRunner(swarm, benchmark, label=label, options=opts).run()
-    return analyze_runs(runs)
+    try:
+        return analyze_runs(runs)
+    except Exception as exc:  # the runs are done (and paid for): hand them back with the plain evaluation
+        raise AnalysisFailed(f"coordination analysis failed: {type(exc).__name__}: {exc}", runs,
+                             analyze_runs(runs, coordination=False)) from exc
