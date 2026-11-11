@@ -50,7 +50,7 @@ from .metrics import (
 )
 from .recorder import AgentSpan, LLMCall, LLMResult, Message, RunContext, SimClock, ToolCall, WallClock
 from .report import render_comparison, render_coordination, render_html, render_text, render_trajectory
-from .runner import FunctionSwarm, RunInterrupted, RunOptions, RunSet, Swarm, SwarmRunner
+from .runner import FunctionSwarm, RunInterrupted, RunOptions, RunSet, Swarm, SwarmContext, SwarmRunner
 from .schema import Artifact, Benchmark, Evaluation, Event, EventType, Span, Task, Trajectory
 from .similarity import EmbeddingSimilarity, LexicalSimilarity, Similarity, resolve_similarity
 
@@ -60,7 +60,7 @@ __all__ = [
     "evaluate", "analyze_runs", "EvaluationResult", "AnalysisFailed", "EfficiencySummary",
     "Task", "Benchmark", "Trajectory", "Event", "EventType", "Span", "Artifact", "Evaluation",
     "RunContext", "AgentSpan", "Message", "LLMResult", "LLMCall", "ToolCall", "SimClock", "WallClock",
-    "Swarm", "FunctionSwarm", "SwarmRunner", "RunInterrupted", "RunOptions", "RunSet",
+    "Swarm", "SwarmContext", "FunctionSwarm", "SwarmRunner", "RunInterrupted", "RunOptions", "RunSet",
     "PerformanceMetrics", "EfficiencyMetrics", "compute_performance", "compute_efficiency",
     "CoordinationMetrics", "CoordinationSummary", "compute_coordination", "summarize_coordination",
     "CommunicationMetrics", "compute_communication", "RedundancyMetrics", "compute_redundancy",

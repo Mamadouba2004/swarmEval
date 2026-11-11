@@ -7,6 +7,8 @@ the finished runs and is re-raised as ``RunInterrupted``, so a script stops inst
 evaluation.
 
 Classes:
+- SwarmContext: What a swarm's ``run`` may use of the context it is handed: ``clock``, ``rng``, ``agent``,
+  ``parallel``, ``gather`` and ``set_output``. The runner passes a ``RunContext``, which provides all of them.
 - Swarm: Interface swarms implement. ``run`` returns the final output and records everything it does through
   ``ctx``.
 - UsageError: SwarmEval was called incorrectly. Unlike a swarm crash this is never recorded as a run result; it
@@ -21,29 +23,52 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import random
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterable, Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from . import evaluators as _evaluators
 from .pricing import PricingTable
-from .recorder import Clock, RunContext, WallClock
-from .schema import Benchmark, Evaluation, EventType, Status, Task, Trajectory
+from .recorder import AgentSpan, Clock, RunContext, WallClock
+from .schema import Artifact, Benchmark, Evaluation, EventType, Status, Task, Trajectory
+
+
+@runtime_checkable
+class SwarmContext(Protocol):
+    clock: Clock
+
+    @property
+    def rng(self) -> random.Random:
+        """Seeded randomness for the current branch."""
+
+    def agent(self, agent_id: str, role: str | None = None, model: str | None = None,
+              **metadata: Any) -> AgentSpan:
+        """Open a span for one invocation of ``agent_id``."""
+
+    def parallel(self, *fns: Callable[[], Any], max_workers: int | None = None) -> list[Any]:
+        """Run callables concurrently and return their results in order."""
+
+    async def gather(self, *aws: Awaitable[Any]) -> list[Any]:
+        """Await coroutines concurrently and return their results in order."""
+
+    def set_output(self, output: Any, artifacts: Iterable[Artifact | str] = ()) -> None:
+        """Set the run's final output and the artifacts it consists of."""
 
 
 class Swarm:
 
-    def run(self, task: Task, ctx: RunContext) -> Any:  # pragma: no cover - interface
+    def run(self, task: Task, ctx: SwarmContext) -> Any:  # pragma: no cover - interface
         """Run the swarm on ``task``, recording through ``ctx``; return the final output."""
         raise NotImplementedError
 
 
 class FunctionSwarm(Swarm):
-    def __init__(self, fn: Callable[[Task, RunContext], Any]) -> None:
+    def __init__(self, fn: Callable[[Task, SwarmContext], Any]) -> None:
         self.fn = fn
 
-    def run(self, task: Task, ctx: RunContext) -> Any:
+    def run(self, task: Task, ctx: SwarmContext) -> Any:
         """Call the wrapped function."""
         return self.fn(task, ctx)
 

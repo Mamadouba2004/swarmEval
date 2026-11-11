@@ -216,3 +216,35 @@ def test_mailbox_put_drain_peek():
     assert box.peek("b") == ["m1", "m2"]
     assert box.drain("b") == ["m1", "m2"]
     assert box.drain("b") == [] and box.peek("c") == ["other"]
+
+
+def test_run_context_is_a_swarm_context():
+    from swarmeval import SwarmContext
+    assert isinstance(make_ctx(), SwarmContext)
+
+
+def test_function_swarm_runs_with_a_minimal_context():
+    import random
+
+    from swarmeval import FunctionSwarm
+
+    class Stub:
+        clock = SimClock()
+        rng = random.Random(0)
+        outputs: list = []
+
+        def agent(self, agent_id, role=None, model=None, **metadata):
+            raise NotImplementedError
+
+        def parallel(self, *fns, max_workers=None):
+            return [f() for f in fns]
+
+        async def gather(self, *aws):
+            return [await a for a in aws]
+
+        def set_output(self, output, artifacts=()):
+            self.outputs.append(output)
+
+    ctx = Stub()
+    FunctionSwarm(lambda task, c: c.set_output(task.input.upper())).run(Task("t", "hi"), ctx)
+    assert ctx.outputs == ["HI"]
