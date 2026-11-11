@@ -109,4 +109,16 @@ def test_cli_writes_the_plain_evaluation_when_coordination_analysis_fails(tmp_pa
     assert (tmp_path / "baseline.json").exists() and (tmp_path / "baseline.events.jsonl").exists()
     err = capsys.readouterr().err
     assert ("swarmeval: coordination analysis failed: ImportError: sentence-transformers is not installed; "
-            "plain evaluation written") in err
+            f"plain evaluation written to {tmp_path}") in err
+
+
+def test_cli_says_the_plain_evaluation_is_only_shown_without_out(capsys, monkeypatch):
+    ev = sys.modules["swarmeval.evaluate"]
+
+    def missing_dep(traj, **kw):
+        raise ImportError("sentence-transformers is not installed")
+
+    monkeypatch.setattr(ev, "compute_coordination", missing_dep)
+    assert main(["demo", "--trials", "1"]) == 1
+    err = capsys.readouterr().err
+    assert "; plain evaluation shown" in err and "written" not in err

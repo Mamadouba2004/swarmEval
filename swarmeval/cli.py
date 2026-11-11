@@ -60,7 +60,8 @@ def _write_plain_evaluation(exc: AnalysisFailed, out: Optional[str]) -> int:
     print(exc.result.report())
     _write_outputs(exc.result, out)
     cause = exc.__cause__
-    print(f"swarmeval: coordination analysis failed: {type(cause).__name__}: {cause}; plain evaluation written",
+    done = f"written to {out}" if out else "shown"
+    print(f"swarmeval: coordination analysis failed: {type(cause).__name__}: {cause}; plain evaluation {done}",
           file=sys.stderr)
     return 1
 
