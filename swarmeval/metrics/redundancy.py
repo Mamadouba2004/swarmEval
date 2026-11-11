@@ -295,7 +295,7 @@ def summarize_redundancy(per_run: Sequence[RedundancyMetrics]) -> RedundancySumm
         similarity_truncated_runs=sum(1 for r in per_run if r.similarity_truncated))
 
 
-def redundancy_rows(red: RedundancySummary) -> list[tuple[str, str] | None]:
+def redundancy_rows(red: RedundancySummary) -> list[tuple[str, str]]:
     """The redundancy rows of the COORDINATION box."""
     pct = lambda x: f"{x * 100:.1f}%"  # noqa: E731
     method = ", ".join(sorted(red.methods)) or "none"

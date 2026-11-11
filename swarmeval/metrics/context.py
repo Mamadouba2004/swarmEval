@@ -179,9 +179,9 @@ def summarize_context(per_run: Sequence[ContextMetrics]) -> ContextSummary:
                           worst_agents=dict(agents), bases=dict(bases))
 
 
-def context_rows(ctx: ContextSummary) -> list[tuple[str, str] | None]:
+def context_rows(ctx: ContextSummary) -> list[tuple[str, str]]:
     """The context-bloat rows of the COORDINATION box."""
-    rows: list[tuple[str, str] | None] = [
+    rows: list[tuple[str, str]] = [
         ("Context Bloat (received ÷ relevant tokens)", ranged(ctx.ratio, lambda x: f"{x:.1f}×"))]
     if ctx.worst_ratio is not None and ctx.worst_agents:
         top = max(ctx.worst_agents.items(), key=lambda kv: (kv[1], kv[0]))[0]

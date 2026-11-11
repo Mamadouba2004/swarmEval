@@ -235,7 +235,7 @@ def summarize_communication(per_run: Sequence[CommunicationMetrics]) -> Communic
         per_agent=per_agent)
 
 
-def communication_rows(comm: CommunicationSummary) -> list[tuple[str, str] | None]:
+def communication_rows(comm: CommunicationSummary) -> list[tuple[str, str]]:
     """The communication rows of the COORDINATION box."""
     hub = ranged(comm.hub_share, lambda x: f"{x * 100:.0f}%")
     if comm.hub_agents:

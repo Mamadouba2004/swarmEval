@@ -305,3 +305,9 @@ def test_report_names_an_analysis_failure_without_per_run_errors(tmp_path, monke
     html = page.read_text(encoding="utf-8")
     assert "coordination analysis failed on 2/2 runs: RuntimeError: analysis bug" in html
     assert "was skipped" not in html
+
+
+def test_load_result_is_exported():
+    import swarmeval
+    from swarmeval.evaluate import load_result
+    assert swarmeval.load_result is load_result and "load_result" in swarmeval.__all__

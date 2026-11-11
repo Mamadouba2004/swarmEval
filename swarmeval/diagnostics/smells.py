@@ -36,9 +36,10 @@ sent that agent its work or a request, or the late message replies to one of the
 
 Custom smells: ``register_smell(name, detector, smells=None, config_cls=None)`` adds ``detector(ctx, section)`` to
 the detectors run by ``detect_smells``, after those already registered, and appends the smells it emits (default
-``(name,)``) to ``SMELLS``; registering a name again replaces its detector.  ``section`` is the detector's
-``config_cls`` instance from section ``name`` of the SmellConfig, or None without a ``config_cls``.  The detector
-receives a ``SmellContext`` with ``traj`` (the Trajectory), ``cm`` (its CoordinationMetrics), ``graph`` (the execution
+``(name,)``) to ``SMELLS``; registering a name again replaces its detector and its smells, and a smell already
+emitted under another name is a ValueError.  ``section`` is the detector's ``config_cls`` instance from section
+``name`` of the SmellConfig, or None without a ``config_cls``.  The detector receives a ``SmellContext`` with
+``traj`` (the Trajectory), ``cm`` (its CoordinationMetrics), ``graph`` (the execution
 graph or None), ``agents`` (agent ids in first-start order), ``roles`` (agent id to role), ``receive_cov`` and
 ``recorded`` (whether message receipts were fully recorded), ``order(agents)`` and
 ``add(smell, severity, agents, observation, hypothesis, intervention, evidence, inferred=False)``, which records a
@@ -690,12 +691,18 @@ def _comm_overhead(c: SmellContext, section: CommunicationOverheadConfig) -> Non
 
 
 _REGISTRY: dict[str, Callable[[SmellContext, Any], None]] = {}
+_EMITS: dict[str, tuple[str, ...]] = {}
 
 
 def register_smell(name: str, detector: Callable[[SmellContext, Any], None], smells: tuple[str, ...] | None = None,
                    config_cls: type | None = None) -> None:
-    """Run ``detector(ctx, section)`` in ``detect_smells`` under ``name`` (replacing one registered there), with its
-    ``config_cls`` thresholds as section ``name`` of ``SmellConfig``; append its smells to ``SMELLS``."""
+    """Run ``detector(ctx, section)`` under ``name`` (replacing its detector, smells and ``config_cls``); a smell
+    another registration emits is a ValueError, a ``config_cls`` needing arguments a TypeError."""
+    emits = tuple(dict.fromkeys(smells or (name,)))
+    for s in emits:
+        owner = next((n for n, e in _EMITS.items() if n != name and s in e), None)
+        if owner is not None:
+            raise ValueError(f"smell {s!r} is already emitted by the detector registered as {owner!r}")
     if config_cls is not None:
         try:
             config_cls()
@@ -703,10 +710,12 @@ def register_smell(name: str, detector: Callable[[SmellContext, Any], None], sme
             raise TypeError(f"config_cls {config_cls.__name__} for smell {name!r} must construct with no "
                             f"arguments (give every field a default): {e}") from e
     _REGISTRY[name] = detector
+    _EMITS[name] = emits
     _CONFIG_CLASSES.pop(name, None)
     if config_cls is not None:
         _CONFIG_CLASSES[name] = config_cls
-    SMELLS.extend(s for s in dict.fromkeys(smells or (name,)) if s not in SMELLS)
+    live = {s for e in _EMITS.values() for s in e}
+    SMELLS[:] = [s for s in SMELLS if s in live] + [s for s in emits if s not in SMELLS]
 
 
 register_smell("redundant_delegation", _redundant_delegation, config_cls=RedundantDelegationConfig)

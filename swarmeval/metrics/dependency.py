@@ -324,8 +324,8 @@ def summarize_dependency(per_run: Sequence[DependencyMetrics]) -> DependencySumm
         critical_path_share={a: sum(v) / n_cp for a, v in share.items()} if n_cp else {})
 
 
-def dependency_rows(dep: DependencySummary) -> list[tuple[str, str] | None]:
-    """The dependency rows of the COORDINATION box, ending with a group separator."""
+def dependency_rows(dep: DependencySummary) -> list[tuple[str, str]]:
+    """The dependency rows of the COORDINATION box."""
     sec = lambda x: f"{x:.1f}s"         # noqa: E731
     times = lambda x: f"{x:.2f}×"       # noqa: E731
     headroom = ranged(dep.headroom_s, sec)
@@ -337,5 +337,4 @@ def dependency_rows(dep: DependencySummary) -> list[tuple[str, str] | None]:
         ("Potential Parallelism (work ÷ critical path)", ranged(dep.potential_parallelism, times)),
         ("Parallel Headroom (wall − critical path)", headroom),
         ("Unrecorded Time (nothing running)", ranged(dep.unrecorded_s, sec)),
-        None,
     ]

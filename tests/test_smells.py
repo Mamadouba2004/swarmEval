@@ -493,12 +493,15 @@ def test_detect_smells_runs_on_precomputed_metrics(demo):
 @pytest.fixture
 def smell_registry():
     from swarmeval.diagnostics import smells as S
-    saved, saved_smells, saved_cls = dict(S._REGISTRY), list(SMELLS), dict(S._CONFIG_CLASSES)
+    saved, saved_emits, saved_smells = dict(S._REGISTRY), dict(S._EMITS), list(SMELLS)
+    saved_cls = dict(S._CONFIG_CLASSES)
     yield S
     S._CONFIG_CLASSES.clear()
     S._CONFIG_CLASSES.update(saved_cls)
     S._REGISTRY.clear()
     S._REGISTRY.update(saved)
+    S._EMITS.clear()
+    S._EMITS.update(saved_emits)
     SMELLS[:] = saved_smells
 
 
@@ -705,6 +708,27 @@ def test_late_and_premature_registers_two_smells(smell_registry):
     assert SMELLS == ["redundant_delegation", "agent_ping_pong", "over_agentization", "under_specialization",
                       "coordinator_bottleneck", "late_information", "premature_synthesis", "context_bloat",
                       "dead_agent", "serialized_execution", "communication_overhead"]
+
+
+def test_register_smell_rejects_smell_owned_by_another_detector(smell_registry):
+    S = smell_registry
+    registry, smells = dict(S._REGISTRY), list(SMELLS)
+    with pytest.raises(ValueError, match=r"dead_agent.*'dead_agent'"):
+        S.register_smell("my_dead", lambda c: None, smells=("dead_agent",))
+    with pytest.raises(ValueError, match=r"late_information.*late_and_premature"):
+        S.register_smell("late_information", lambda c: None)
+    assert S._REGISTRY == registry and SMELLS == smells
+
+
+def test_reregister_smell_drops_stale_smell_names(smell_registry):
+    S = smell_registry
+    before, same = list(SMELLS), SMELLS
+    S.register_smell("multi", lambda c: None, smells=("m1", "m2"))
+    assert SMELLS == before + ["m1", "m2"]
+    g = lambda c: None  # noqa: E731
+    S.register_smell("multi", g)
+    assert S._REGISTRY["multi"] is g
+    assert SMELLS == before + ["multi"] and SMELLS is same
 
 
 def D(smell, sev, run, agents=(), inferred=False, obs=None):
