@@ -204,6 +204,17 @@ class EvaluationResult:
                 f"cost={cost})")
 
 
+class AnalysisFailed(Exception):
+    """Raised by ``evaluate()`` when the analysis fails after the runs have
+    executed.  ``runs`` keeps the trajectories and ``result`` is the plain
+    evaluation (``coordination=False``); the original error is ``__cause__``."""
+
+    def __init__(self, message: str, runs: RunSet, result: EvaluationResult) -> None:
+        super().__init__(message)
+        self.runs = runs
+        self.result = result
+
+
 def load_runset(path: str) -> RunSet:
     """Load trajectories from a saved RunSet or a saved EvaluationResult.
     Raises ``ValueError`` for a result saved without its trajectories."""
@@ -271,4 +282,8 @@ def evaluate(swarm: Any, benchmark: Benchmark, trials: int = 1, seed: int = 0, e
                       progress=progress, raise_errors=raise_errors, on_run=on_run, capture_text=capture_text,
                       max_text_chars=max_text_chars)
     runs = SwarmRunner(swarm, benchmark, label=label, options=opts).run()
-    return analyze_runs(runs)
+    try:
+        return analyze_runs(runs)
+    except Exception as exc:  # the runs are done (and paid for): hand them back with the plain evaluation
+        raise AnalysisFailed(f"coordination analysis failed: {type(exc).__name__}: {exc}", runs,
+                             analyze_runs(runs, coordination=False)) from exc

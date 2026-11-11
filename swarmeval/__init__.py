@@ -12,7 +12,7 @@ Quick start::
     print(result.report())
 """
 from . import evaluators
-from .evaluate import EfficiencySummary, EvaluationResult, analyze_runs, evaluate
+from .evaluate import AnalysisFailed, EfficiencySummary, EvaluationResult, analyze_runs, evaluate
 from .recorder import AgentSpan, LLMCall, LLMResult, Message, RunContext, SimClock, ToolCall, WallClock
 from .runner import FunctionSwarm, RunOptions, RunSet, Swarm, SwarmRunner
 from .schema import Artifact, Benchmark, Evaluation, Event, EventType, Span, Task, Trajectory
@@ -26,7 +26,7 @@ from .compare import Comparison, compare
 __version__ = "0.1.0"
 
 __all__ = [
-    "evaluate", "analyze_runs", "EvaluationResult", "EfficiencySummary",
+    "evaluate", "analyze_runs", "EvaluationResult", "AnalysisFailed", "EfficiencySummary",
     "Task", "Benchmark", "Trajectory", "Event", "EventType", "Span", "Artifact", "Evaluation",
     "RunContext", "AgentSpan", "Message", "LLMResult", "LLMCall", "ToolCall", "SimClock", "WallClock",
     "Swarm", "FunctionSwarm", "SwarmRunner", "RunOptions", "RunSet",

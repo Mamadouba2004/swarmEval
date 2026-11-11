@@ -1,4 +1,5 @@
 import json
+import sys
 
 from swarmeval.examples.research_swarm import build_benchmark, make_swarm
 from swarmeval import (Benchmark, EvaluationResult, FunctionSwarm, SimClock, Task, evaluate, read_events_jsonl,
@@ -95,3 +96,17 @@ def test_cli_demo_run_report(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "SWARM EVALUATION" in captured.out and "cli  ·  research_briefs" in captured.out
     assert "run_start" in captured.out
+
+
+def test_cli_writes_the_plain_evaluation_when_coordination_analysis_fails(tmp_path, capsys, monkeypatch):
+    ev = sys.modules["swarmeval.evaluate"]
+
+    def missing_dep(traj, **kw):
+        raise ImportError("sentence-transformers is not installed")
+
+    monkeypatch.setattr(ev, "compute_coordination", missing_dep)
+    assert main(["demo", "--trials", "1", "--out", str(tmp_path)]) == 1
+    assert (tmp_path / "baseline.json").exists() and (tmp_path / "baseline.events.jsonl").exists()
+    err = capsys.readouterr().err
+    assert ("swarmeval: coordination analysis failed: ImportError: sentence-transformers is not installed; "
+            "plain evaluation written") in err

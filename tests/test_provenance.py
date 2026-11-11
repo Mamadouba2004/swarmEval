@@ -298,3 +298,21 @@ def test_coordination_failure_on_every_run_raises(monkeypatch):
     monkeypatch.setattr(ev, "compute_coordination", missing_dep)
     with pytest.raises(ImportError, match="sentence-transformers"):
         analyze_runs(runs)
+
+
+def test_coordination_config_error_in_evaluate_keeps_the_runs(monkeypatch):
+    """A failure after every (paid) run has executed must not throw the runs away."""
+    from swarmeval import AnalysisFailed, evaluate
+    from swarmeval.examples.research_swarm import build_benchmark, make_swarm
+    ev = sys.modules["swarmeval.evaluate"]
+
+    def missing_dep(traj, **kw):
+        raise ImportError("sentence-transformers is not installed")
+
+    monkeypatch.setattr(ev, "compute_coordination", missing_dep)
+    with pytest.raises(AnalysisFailed, match="ImportError: sentence-transformers") as info:
+        evaluate(make_swarm, build_benchmark(3), trials=1, clock_factory=SimClock)
+    exc = info.value
+    assert len(exc.runs) == 3
+    assert exc.result.coordination is None and exc.result.performance.n_runs == 3
+    assert isinstance(exc.__cause__, ImportError)
