@@ -273,6 +273,13 @@ def analyze_runs(runs: RunSet, pricing: Optional[PricingTable] = None, coordinat
                             coordination=coord_summary, coordination_errors=errors)
 
 
+def failure_errors(exc: BaseException, runs: RunSet) -> Dict[str, str]:
+    """The per-run errors behind a failed coordination analysis, for the plain
+    fallback result: those ``analyze_runs`` attached, else ``exc`` for every run."""
+    return getattr(exc, "coordination_errors", None) or {
+        t.run_id: f"{type(exc).__name__}: {exc}" for t in runs.trajectories}
+
+
 def evaluate(swarm: Any, benchmark: Benchmark, trials: int = 1, seed: int = 0, evaluator: Any = None,
              clock_factory: Optional[Callable[[], Clock]] = None, pricing: Optional[PricingTable] = None,
              label: str = "baseline", progress: bool = False, raise_errors: bool = False,
@@ -300,6 +307,5 @@ def evaluate(swarm: Any, benchmark: Benchmark, trials: int = 1, seed: int = 0, e
         return analyze_runs(runs, coordination=coordination, similarity=similarity, smell_config=smell_config)
     except Exception as exc:  # the runs are done (and paid for): hand them back with the plain evaluation
         plain = analyze_runs(runs, coordination=False)
-        plain.coordination_errors = getattr(exc, "coordination_errors", None) or {
-            t.run_id: f"{type(exc).__name__}: {exc}" for t in runs.trajectories}
+        plain.coordination_errors = failure_errors(exc, runs)
         raise AnalysisFailed(f"coordination analysis failed: {type(exc).__name__}: {exc}", runs, plain) from exc

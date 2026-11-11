@@ -19,7 +19,7 @@ import sys
 from typing import Any, Callable, Dict, List, Optional
 
 from . import __version__
-from .evaluate import AnalysisFailed, EvaluationResult, analyze_runs, evaluate, load_runset
+from .evaluate import AnalysisFailed, EvaluationResult, analyze_runs, evaluate, failure_errors, load_runset
 from .export import export_events
 from .diagnostics.smells import load_smell_config
 from .export.jsonl import write_events_jsonl
@@ -179,7 +179,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     except Exception as exc:  # every run failed the same way: the runs are on disk, show what still holds
         _analysis_failed(exc)
         result, code = analyze_runs(runs, pricing=pricing, coordination=False), 1
-        result.coordination_errors = getattr(exc, "coordination_errors", {})
+        result.coordination_errors = failure_errors(exc, runs)
     print(result.report())
     if args.trace is not None:
         if not 0 <= args.trace < len(runs):

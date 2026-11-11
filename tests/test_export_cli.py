@@ -207,3 +207,23 @@ def test_compare_shows_the_plain_comparison_when_coordination_analysis_fails(tmp
     assert out.strip()
     assert ("swarmeval: coordination analysis failed: KeyError: 'span_x'; showing the plain evaluation "
             "(rerun with --no-coordination to skip it)") in err
+
+
+def test_report_names_an_analysis_failure_without_per_run_errors(tmp_path, monkeypatch):
+    import swarmeval.cli as cli
+    from swarmeval import SimClock, evaluate
+    from swarmeval.examples.research_swarm import build_benchmark, make_swarm
+    saved, page = tmp_path / "runs.json", tmp_path / "r.html"
+    evaluate(make_swarm, build_benchmark(2), trials=1, clock_factory=SimClock).runs.save(str(saved))
+    real = cli.analyze_runs
+
+    def broken(runs, *a, coordination=True, **kw):   # fails before any per-run analysis
+        if coordination:
+            raise RuntimeError("analysis bug")
+        return real(runs, *a, coordination=False, **kw)
+
+    monkeypatch.setattr(cli, "analyze_runs", broken)
+    assert main(["report", str(saved), "--html", str(page)]) == 1
+    html = page.read_text(encoding="utf-8")
+    assert "coordination analysis failed on 2/2 runs: RuntimeError: analysis bug" in html
+    assert "was skipped" not in html
