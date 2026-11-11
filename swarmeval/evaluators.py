@@ -69,8 +69,7 @@ class ExactMatch(Evaluator):
         return {"type": self.name, "expected": self.expected, "normalize": self.normalize}
 
 
-class ContainsAll(Evaluator):
-    name = "contains_all"
+class _KeywordEvaluator(Evaluator):
 
     def __init__(self, keywords: Sequence[str] | None = None, forbidden: Sequence[str] = (),
                  case_insensitive: bool = True) -> None:
@@ -84,14 +83,8 @@ class ContainsAll(Evaluator):
             task.expected if isinstance(task.expected, list) else [task.expected])
         return [str(k) for k in keywords if k is not None]
 
-    def check(self, task: Task) -> None:
-        """Require at least one keyword, so the evaluator cannot pass any output."""
-        if not self._keywords(task):
-            raise ValueError(f"{self.name} has no keywords (set 'keywords' in the spec or a list "
-                             f"'expected' on the task); it would pass any output")
-
-    def evaluate(self, task: Task, output: Any, trajectory: Trajectory | None = None) -> Evaluation:
-        """Succeed if every keyword appears and no forbidden one does; score is the share found."""
+    def _match(self, task: Task, output: Any) -> tuple[list[str], list[str], list[str], list[str]]:
+        """The keywords, those found, those missing and the forbidden ones present in ``output``."""
         keywords = self._keywords(task)
         text = to_text(output)
         if self.case_insensitive:
@@ -101,12 +94,13 @@ class ContainsAll(Evaluator):
         else:
             found = [k for k in keywords if k in text]
             bad = [f for f in self.forbidden if f in text]
-        frac = len(found) / len(keywords) if keywords else 1.0
-        score = max(0.0, frac - 0.5 * len(bad) / max(1, len(self.forbidden) or 1)) if bad else frac
-        ok = len(found) == len(keywords) and not bad
-        return Evaluation(ok, score, self.name, {"found": found, "missing": [k for k in keywords if k not in found],
-                                                 "forbidden_hits": bad},
-                          constraints_passed=not bad)
+        return keywords, found, [k for k in keywords if k not in found], bad
+
+    def check(self, task: Task) -> None:
+        """Require at least one keyword, so the evaluator cannot pass any output."""
+        if not self._keywords(task):
+            raise ValueError(f"{self.name} has no keywords (set 'keywords' in the spec or a list "
+                             f"'expected' on the task); it would pass any output")
 
     def to_spec(self) -> dict[str, Any]:
         """The evaluator as a JSON spec."""
@@ -114,15 +108,28 @@ class ContainsAll(Evaluator):
                 "case_insensitive": self.case_insensitive}
 
 
-class ContainsAny(ContainsAll):
+class ContainsAll(_KeywordEvaluator):
+    name = "contains_all"
+
+    def evaluate(self, task: Task, output: Any, trajectory: Trajectory | None = None) -> Evaluation:
+        """Succeed if every keyword appears and no forbidden one does; score is the share found."""
+        keywords, found, missing, bad = self._match(task, output)
+        frac = len(found) / len(keywords) if keywords else 1.0
+        score = max(0.0, frac - 0.5 * len(bad) / max(1, len(self.forbidden) or 1)) if bad else frac
+        ok = len(found) == len(keywords) and not bad
+        return Evaluation(ok, score, self.name, {"found": found, "missing": missing, "forbidden_hits": bad},
+                          constraints_passed=not bad)
+
+
+class ContainsAny(_KeywordEvaluator):
     name = "contains_any"
 
     def evaluate(self, task: Task, output: Any, trajectory: Trajectory | None = None) -> Evaluation:
         """Succeed if any keyword appears and no forbidden one does."""
-        ev = super().evaluate(task, output, trajectory)
-        found = ev.details["found"]
-        ok = bool(found) and not ev.details["forbidden_hits"]
-        return Evaluation(ok, 1.0 if ok else 0.0, self.name, ev.details, constraints_passed=ev.constraints_passed)
+        _, found, missing, bad = self._match(task, output)
+        ok = bool(found) and not bad
+        return Evaluation(ok, 1.0 if ok else 0.0, self.name, {"found": found, "missing": missing,
+                                                             "forbidden_hits": bad}, constraints_passed=not bad)
 
 
 class Regex(Evaluator):

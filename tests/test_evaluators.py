@@ -24,6 +24,31 @@ def test_contains_all_uses_task_expected_when_no_keywords():
     assert E.ContainsAny().evaluate(T(expected=["a", "b"]), "only b").success
 
 
+def test_contains_any_is_not_a_contains_all():
+    assert not issubclass(E.ContainsAny, E.ContainsAll)
+    kw = ["alpha", "beta"]
+    cases = [
+        (kw, [], True, None, "Alpha and BETA",
+         (True, 1.0, ["alpha", "beta"], [], [], True), (True, 1.0, ["alpha", "beta"], [], [], True)),
+        (kw, [], True, None, "alpha only",
+         (False, 0.5, ["alpha"], ["beta"], [], True), (True, 1.0, ["alpha"], ["beta"], [], True)),
+        (kw, [], True, None, "nothing",
+         (False, 0.0, [], kw, [], True), (False, 0.0, [], kw, [], True)),
+        (kw, ["gamma", "delta"], True, None, "alpha GAMMA",
+         (False, 0.25, ["alpha"], ["beta"], ["gamma"], False), (False, 0.0, ["alpha"], ["beta"], ["gamma"], False)),
+        (None, [], True, ["x", "y"], "has y",
+         (False, 0.5, ["y"], ["x"], [], True), (True, 1.0, ["y"], ["x"], [], True)),
+        (["Alpha", "beta"], ["Gamma"], False, None, "Alpha BETA gamma",
+         (False, 0.5, ["Alpha"], ["beta"], [], True), (True, 1.0, ["Alpha"], ["beta"], [], True)),
+    ]
+    for keywords, forbidden, ci, expected, output, want_all, want_any in cases:
+        for cls, want in ((E.ContainsAll, want_all), (E.ContainsAny, want_any)):
+            r = cls(keywords, forbidden, case_insensitive=ci).evaluate(T(expected=expected), output)
+            assert (r.success, r.score, r.details["found"], r.details["missing"], r.details["forbidden_hits"],
+                    r.constraints_passed) == want, (cls.__name__, output)
+            assert list(r.details) == ["found", "missing", "forbidden_hits"] and r.evaluator == cls.name
+
+
 def test_exact_regex_numeric():
     assert E.ExactMatch().evaluate(T(expected="Paris"), " paris ").success
     assert E.Regex(r"\bok\b").evaluate(T(), "all OK here").success
