@@ -139,6 +139,19 @@ def test_extra_analysis_reaches_json():
     assert res.to_dict()["coordination"]["extra"] == {"toy": {"runs": 2, "events": 2 * n_events}}
 
 
+def test_coordination_rows_separators_follow_registry_order(monkeypatch):
+    from swarmeval import ANALYSES
+    from swarmeval.report import text
+    cs = analyze_runs(RunSet("lbl", "bench", [_traj("t1", 0, True, 1.0)])).coordination
+    family = {a.name: a.rows(cs.get(a.name)) for a in ANALYSES}
+    assert all(None not in rows for rows in family.values())
+    monkeypatch.setattr(text, "ANALYSES", ANALYSES[::-1])
+    rows = text.coordination_rows(cs)
+    assert rows[0] is not None and all(a is not None or b is not None for a, b in zip(rows, rows[1:], strict=False))
+    assert rows == (family["context"] + family["redundancy"] + family["communication"] + [None]
+                    + family["dependency"] + [None] + rows[-2:])
+
+
 def test_default_to_dict_has_no_extra():
     res = analyze_runs(RunSet("lbl", "bench", [_traj("t1", 0, True, 1.0)]))
     assert res.coordination.extra == {} and res.per_run_coordination[0].extra == {}

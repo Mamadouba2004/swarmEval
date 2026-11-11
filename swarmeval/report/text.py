@@ -165,16 +165,22 @@ def _wrap(prefix: str, text: str, indent: int, width: int = 104) -> list[str]:
 
 
 def coordination_rows(cs: Any) -> list[tuple[str, str] | None]:
-    """``(label, value)`` rows of the COORDINATION box, ``None`` between groups, each label carrying its
-    definition; the text and HTML reports both render them."""
+    """``(label, value)`` rows of the COORDINATION box, ``None`` between analysis groups and before the coverage
+    rows, each label carrying its definition; the text and HTML reports both render them."""
     pct = lambda x: f"{x * 100:.1f}%"  # noqa: E731
     rows: list[tuple[str, str] | None] = []
+    prev = None
     for a in ANALYSES:
         summary = cs.get(a.name)
-        if summary is not None:
-            rows += a.rows(summary)
-    rows += [None,
-             ("Dependency Coverage (receive events)", _ranged(cs.message_receive_coverage, pct)),
+        family = a.rows(summary) if summary is not None else []
+        if not family:
+            continue
+        if rows and (a.group or a.name) != prev:
+            rows.append(None)
+        rows += family
+        prev = a.group or a.name
+    rows += [None] if rows else []
+    rows += [("Dependency Coverage (receive events)", _ranged(cs.message_receive_coverage, pct)),
              ("Derivation Coverage (derived_from)", _ranged(cs.derivation_coverage, pct))]
     return rows
 

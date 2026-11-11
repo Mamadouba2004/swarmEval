@@ -12,7 +12,8 @@ the four built-ins lands in ``extra``.
 Classes:
 - AnalysisInput: What every registry analysis receives for one run (``similarity`` already resolved).
 - CoordinationAnalysis: One registry analysis: per-run ``compute``, ``summarize`` over runs, its compare ``metrics``
-  ``(key, label, higher_is_better, unit, summary_field)`` and its report ``rows``.
+  ``(key, label, higher_is_better, unit, summary_field)``, its report ``rows`` (no separators) and the report
+  ``group`` whose rows it shares a block with (default: its own block).
 - CoordinationMetrics: Coordination analysis of one run. ``graph`` is kept for later analyses and exports but left
   out of ``to_dict`` (export it separately).
 - CoordinationSummary: Coordination metrics over a set of runs. Coverage summaries are over the runs where the ratio
@@ -89,18 +90,19 @@ class CoordinationAnalysis:
     compute: Callable[[AnalysisInput], Any]
     summarize: Callable[[list[Any]], Any]
     metrics: tuple[tuple[str, str, bool | None, str, str], ...]
-    rows: Callable[[Any], list[tuple[str, str] | None]]
+    rows: Callable[[Any], list[tuple[str, str]]]
+    group: str = ""
 
 
 ANALYSES = (
     CoordinationAnalysis("dependency", lambda i: compute_dependency(i.traj, i.graph, i.efficiency),
                          summarize_dependency, DEPENDENCY_METRICS, dependency_rows),
     CoordinationAnalysis("communication", lambda i: compute_communication(i.traj, i.graph),
-                         summarize_communication, COMMUNICATION_METRICS, communication_rows),
+                         summarize_communication, COMMUNICATION_METRICS, communication_rows, "overhead"),
     CoordinationAnalysis("redundancy", lambda i: compute_redundancy(i.traj, i.graph, i.similarity),
-                         summarize_redundancy, REDUNDANCY_METRICS, redundancy_rows),
+                         summarize_redundancy, REDUNDANCY_METRICS, redundancy_rows, "overhead"),
     CoordinationAnalysis("context", lambda i: compute_context(i.traj), summarize_context, CONTEXT_METRICS,
-                         context_rows),
+                         context_rows, "overhead"),
 )
 _TYPED = frozenset({"dependency", "communication", "redundancy", "context"})
 
